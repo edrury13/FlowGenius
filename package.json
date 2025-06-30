@@ -1,0 +1,58 @@
+{
+  "name": "flowgenius",
+  "productName": "flowgenius",
+  "version": "1.0.0",
+  "description": "My Electron application description",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "publish": "electron-forge publish",
+    "lint": "echo \"No linting configured\""
+  },
+  "keywords": [],
+  "author": {
+    "name": "ericDrury",
+    "email": "56265129+ericDrury@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.2.0",
+    "@mui/material": "^7.2.0",
+    "@reduxjs/toolkit": "^2.8.2",
+    "@supabase/supabase-js": "^2.50.2",
+    "@types/node": "^24.0.7",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "dayjs": "^1.11.13",
+    "dotenv": "^17.0.0",
+    "electron-squirrel-startup": "^1.0.1",
+    "node-notifier": "^10.0.1",
+    "react": "^19.1.0",
+    "react-big-calendar": "^1.19.4",
+    "react-dom": "^19.1.0",
+    "react-redux": "^9.2.0",
+    "typescript": "^5.8.3"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.8.1",
+    "@electron-forge/maker-deb": "^7.8.1",
+    "@electron-forge/maker-rpm": "^7.8.1",
+    "@electron-forge/maker-squirrel": "^7.8.1",
+    "@electron-forge/maker-zip": "^7.8.1",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.8.1",
+    "@electron-forge/plugin-fuses": "^7.8.1",
+    "@electron-forge/plugin-webpack": "^7.8.1",
+    "@electron/fuses": "^1.8.0",
+    "@vercel/webpack-asset-relocator-loader": "^1.7.4",
+    "css-loader": "^7.1.2",
+    "electron": "37.1.0",
+    "html-webpack-plugin": "^5.6.3",
+    "node-loader": "^2.1.0",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.2"
+  }
+}
