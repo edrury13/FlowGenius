@@ -2,11 +2,30 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 
-// Import CSS for the calendar component
-import 'react-big-calendar/lib/css/react-big-calendar.css';
+console.log('🚀 React entry point loaded');
 
 const container = document.getElementById('root');
-if (!container) throw new Error('Failed to find the root element');
+console.log('📍 Root container:', container);
 
-const root = createRoot(container);
-root.render(<App />); 
+if (!container) {
+  console.error('❌ Failed to find the root element');
+  document.body.innerHTML = '<div style="padding: 20px; font-family: Arial; color: red;">❌ Failed to find root element</div>';
+} else {
+  try {
+    console.log('🎨 Creating React root...');
+    const root = createRoot(container);
+    
+    console.log('🎭 Rendering React app...');
+    root.render(<App />);
+    
+    console.log('✅ React app rendered successfully!');
+  } catch (error) {
+    console.error('❌ Error rendering React app:', error);
+    container.innerHTML = `
+      <div style="padding: 20px; background: red; color: white;">
+        <h2>React Error</h2>
+        <p>${error instanceof Error ? error.message : String(error)}</p>
+      </div>
+    `;
+  }
+} 

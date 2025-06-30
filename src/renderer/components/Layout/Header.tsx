@@ -3,108 +3,142 @@ import {
   AppBar,
   Toolbar,
   Typography,
+  Button,
   Box,
   IconButton,
-  Chip,
   Avatar,
+  Menu,
+  MenuItem,
 } from '@mui/material';
-import {
-  ChevronLeft,
-  ChevronRight,
-  Notifications,
-  AccountCircle,
-} from '@mui/icons-material';
+import { Add, Notifications, AccountCircle, ChevronLeft, ChevronRight, Today } from '@mui/icons-material';
 import { User } from '@supabase/supabase-js';
-import { CalendarView } from '../../types';
+import dayjs from 'dayjs';
+
+import { useAppSelector, useAppDispatch } from '../../store/hooks';
+import { setShowEventModal, navigateDate } from '../../store/appSlice';
 
 interface HeaderProps {
-  user: User;
-  currentView: CalendarView;
-  selectedDate: Date;
-  onDateChange: (date: Date) => void;
+  user: User | null;
 }
 
-const Header: React.FC<HeaderProps> = ({
-  user,
-  currentView,
-  selectedDate,
-  onDateChange,
-}) => {
-  const formatDate = (date: Date) => {
-    const options: Intl.DateTimeFormatOptions = {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    };
-    return date.toLocaleDateString(undefined, options);
+const Header: React.FC<HeaderProps> = ({ user }) => {
+  const dispatch = useAppDispatch();
+  const { currentView, selectedDate } = useAppSelector(state => state.app);
+  const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+
+  const handleNewEvent = () => {
+    dispatch(setShowEventModal(true));
   };
 
-  const navigateDate = (direction: 'prev' | 'next') => {
-    const newDate = new Date(selectedDate);
-    
+  const handleNavigation = (direction: 'prev' | 'next' | 'today') => {
+    dispatch(navigateDate(direction));
+  };
+
+  const handleProfileMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleProfileMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const getDateLabel = () => {
+    const date = dayjs(selectedDate);
     switch (currentView) {
       case 'month':
-        newDate.setMonth(newDate.getMonth() + (direction === 'next' ? 1 : -1));
-        break;
+        return date.format('MMMM YYYY');
       case 'week':
-        newDate.setDate(newDate.getDate() + (direction === 'next' ? 7 : -7));
-        break;
+        const startOfWeek = date.startOf('week');
+        const endOfWeek = date.endOf('week');
+        return `${startOfWeek.format('MMM D')} - ${endOfWeek.format('MMM D, YYYY')}`;
       case 'day':
-        newDate.setDate(newDate.getDate() + (direction === 'next' ? 1 : -1));
-        break;
+        return date.format('dddd, MMMM D, YYYY');
+      case 'agenda':
+        return 'Agenda View';
       default:
-        break;
+        return date.format('MMMM YYYY');
     }
-    
-    onDateChange(newDate);
-  };
-
-  const goToToday = () => {
-    onDateChange(new Date());
   };
 
   return (
-    <AppBar position="static" color="default" elevation={1}>
+    <AppBar 
+      position="static" 
+      elevation={0}
+      sx={{ 
+        backgroundColor: 'white',
+        color: 'text.primary',
+        borderBottom: '1px solid #e0e0e0'
+      }}
+    >
       <Toolbar>
         {/* Date Navigation */}
-        <Box sx={{ display: 'flex', alignItems: 'center', mr: 4 }}>
-          <IconButton onClick={() => navigateDate('prev')}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <IconButton onClick={() => handleNavigation('prev')} size="small">
             <ChevronLeft />
           </IconButton>
-          
-          <Typography variant="h6" sx={{ mx: 2, minWidth: 200 }}>
-            {formatDate(selectedDate)}
-          </Typography>
-          
-          <IconButton onClick={() => navigateDate('next')}>
+          <IconButton onClick={() => handleNavigation('today')} size="small" color="primary">
+            <Today />
+          </IconButton>
+          <IconButton onClick={() => handleNavigation('next')} size="small">
             <ChevronRight />
           </IconButton>
-          
-          <Chip
-            label="Today"
-            onClick={goToToday}
-            variant="outlined"
-            sx={{ ml: 2 }}
-          />
+          <Typography variant="h6" sx={{ ml: 2, minWidth: '200px' }}>
+            {getDateLabel()}
+          </Typography>
         </Box>
 
-        {/* Spacer */}
         <Box sx={{ flexGrow: 1 }} />
 
-        {/* Right side - Notifications and User */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <IconButton>
+        {/* Action Buttons */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={handleNewEvent}
+            size="small"
+          >
+            New Event
+          </Button>
+
+          <IconButton size="small">
             <Notifications />
           </IconButton>
-          
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Avatar sx={{ width: 32, height: 32 }}>
+
+          <IconButton
+            onClick={handleProfileMenuOpen}
+            size="small"
+          >
+            {user?.user_metadata?.avatar_url ? (
+              <Avatar 
+                src={user.user_metadata.avatar_url} 
+                sx={{ width: 32, height: 32 }}
+              />
+            ) : (
               <AccountCircle />
-            </Avatar>
-            <Typography variant="body2" color="text.secondary">
-              {user.email}
-            </Typography>
-          </Box>
+            )}
+          </IconButton>
+
+          <Menu
+            anchorEl={anchorEl}
+            open={Boolean(anchorEl)}
+            onClose={handleProfileMenuClose}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'right',
+            }}
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'right',
+            }}
+          >
+            <MenuItem onClick={handleProfileMenuClose}>
+              <Typography variant="body2">
+                {user?.email}
+              </Typography>
+            </MenuItem>
+            <MenuItem onClick={handleProfileMenuClose}>Profile</MenuItem>
+            <MenuItem onClick={handleProfileMenuClose}>Settings</MenuItem>
+          </Menu>
         </Box>
       </Toolbar>
     </AppBar>

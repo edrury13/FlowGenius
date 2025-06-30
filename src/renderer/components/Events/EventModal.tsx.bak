@@ -1,0 +1,492 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  TextField,
+  FormControl,
+  FormLabel,
+  FormControlLabel,
+  Switch,
+  Checkbox,
+  Select,
+  MenuItem,
+  InputLabel,
+  Box,
+  Typography,
+  Chip,
+  IconButton,
+  Alert,
+  Grid,
+} from '@mui/material';
+import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { Add, Remove, LocationOn, People, Repeat } from '@mui/icons-material';
+import dayjs, { Dayjs } from 'dayjs';
+import { useAppSelector, useAppDispatch } from '../../store/hooks';
+import { createEvent, updateEvent, deleteEvent } from '../../store/eventsSlice';
+import { setShowEventModal } from '../../store/appSlice';
+import { EventFormData, RecurrenceOptions } from '../../types';
+
+const EventModal: React.FC = () => {
+  const dispatch = useAppDispatch();
+  const { user } = useAppSelector((state: any) => state.auth);
+  const { selectedEvent } = useAppSelector((state: any) => state.events);
+  const { showEventModal } = useAppSelector((state: any) => state.app);
+
+  // Form state
+  const [formData, setFormData] = useState<EventFormData>({
+    title: '',
+    description: '',
+    startTime: dayjs().hour(9).minute(0).second(0).toDate(),
+    endTime: dayjs().hour(10).minute(0).second(0).toDate(),
+    location: '',
+    attendees: [],
+    isRecurring: false,
+    recurrenceRule: '',
+  });
+
+  const [attendeeInput, setAttendeeInput] = useState('');
+  const [recurrenceOptions, setRecurrenceOptions] = useState<RecurrenceOptions>({
+    frequency: 'weekly',
+    interval: 1,
+    daysOfWeek: [],
+  });
+  const [showRecurrenceOptions, setShowRecurrenceOptions] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Load event data when editing
+  useEffect(() => {
+    if (selectedEvent) {
+      setFormData({
+        title: selectedEvent.title,
+        description: selectedEvent.description || '',
+        startTime: new Date(selectedEvent.start_time),
+        endTime: new Date(selectedEvent.end_time),
+        location: selectedEvent.location || '',
+        attendees: selectedEvent.attendees || [],
+        isRecurring: selectedEvent.is_recurring,
+        recurrenceRule: selectedEvent.recurrence_rule || '',
+      });
+      setShowRecurrenceOptions(selectedEvent.is_recurring);
+    } else {
+      // Reset form for new event
+      setFormData({
+        title: '',
+        description: '',
+        startTime: dayjs().hour(9).minute(0).second(0).toDate(),
+        endTime: dayjs().hour(10).minute(0).second(0).toDate(),
+        location: '',
+        attendees: [],
+        isRecurring: false,
+        recurrenceRule: '',
+      });
+      setShowRecurrenceOptions(false);
+    }
+    setErrors({});
+  }, [selectedEvent, showEventModal]);
+
+  // Form validation
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    if (!formData.title.trim()) {
+      newErrors.title = 'Title is required';
+    }
+
+    if (formData.title.length > 100) {
+      newErrors.title = 'Title must be less than 100 characters';
+    }
+
+    if (formData.description && formData.description.length > 2000) {
+      newErrors.description = 'Description must be less than 2000 characters';
+    }
+
+    if (dayjs(formData.endTime).isBefore(dayjs(formData.startTime))) {
+      newErrors.endTime = 'End time must be after start time';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  // Generate recurrence rule string
+  const generateRecurrenceRule = (): string => {
+    if (!formData.isRecurring) return '';
+
+    const { frequency, interval, endDate, count, daysOfWeek } = recurrenceOptions;
+    let rule = `FREQ=${frequency.toUpperCase()}`;
+
+    if (interval > 1) {
+      rule += `;INTERVAL=${interval}`;
+    }
+
+    if (daysOfWeek && daysOfWeek.length > 0) {
+      const days = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
+      const selectedDays = daysOfWeek.map(day => days[day]).join(',');
+      rule += `;BYDAY=${selectedDays}`;
+    }
+
+    if (endDate) {
+      rule += `;UNTIL=${dayjs(endDate).format('YYYYMMDD')}T235959Z`;
+    } else if (count) {
+      rule += `;COUNT=${count}`;
+    }
+
+    return rule;
+  };
+
+  // Handle form submission
+  const handleSubmit = async () => {
+    if (!validateForm() || !user?.id) return;
+
+    setIsSubmitting(true);
+    try {
+      const eventData: EventFormData = {
+        ...formData,
+        recurrenceRule: generateRecurrenceRule(),
+      };
+
+      if (selectedEvent) {
+        await dispatch(updateEvent({
+          eventId: selectedEvent.id,
+          eventData,
+          userId: user.id,
+        })).unwrap();
+      } else {
+        await dispatch(createEvent({
+          eventData,
+          userId: user.id,
+        })).unwrap();
+      }
+
+      handleClose();
+    } catch (error) {
+      console.error('Error saving event:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle event deletion
+  const handleDelete = async () => {
+    if (!selectedEvent) return;
+
+    setIsSubmitting(true);
+    try {
+      await dispatch(deleteEvent(selectedEvent.id)).unwrap();
+      handleClose();
+    } catch (error) {
+      console.error('Error deleting event:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleClose = () => {
+    dispatch(setShowEventModal(false));
+    setErrors({});
+    setIsSubmitting(false);
+  };
+
+  // Add attendee
+  const handleAddAttendee = () => {
+    if (attendeeInput.trim() && !formData.attendees.includes(attendeeInput.trim())) {
+      setFormData(prev => ({
+        ...prev,
+        attendees: [...prev.attendees, attendeeInput.trim()],
+      }));
+      setAttendeeInput('');
+    }
+  };
+
+  // Remove attendee
+  const handleRemoveAttendee = (email: string) => {
+    setFormData(prev => ({
+      ...prev,
+      attendees: prev.attendees.filter(attendee => attendee !== email),
+    }));
+  };
+
+  const isEditing = !!selectedEvent;
+
+  return (
+    <LocalizationProvider dateAdapter={AdapterDayjs}>
+      <Dialog 
+        open={showEventModal} 
+        onClose={handleClose} 
+        maxWidth="md" 
+        fullWidth
+        PaperProps={{
+          sx: { minHeight: '600px' }
+        }}
+      >
+        <DialogTitle>
+          {isEditing ? 'Edit Event' : 'Create New Event'}
+        </DialogTitle>
+
+        <DialogContent dividers>
+          <Grid container spacing={3}>
+            {/* Title */}
+            <Grid item xs={12}>
+              <TextField
+                label="Event Title"
+                value={formData.title}
+                onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                error={!!errors.title}
+                helperText={errors.title}
+                fullWidth
+                required
+                inputProps={{ maxLength: 100 }}
+              />
+            </Grid>
+
+            {/* Date and Time */}
+            <Grid item xs={6}>
+              <DateTimePicker
+                label="Start Date & Time"
+                value={dayjs(formData.startTime)}
+                onChange={(newValue) => {
+                  if (newValue) {
+                    setFormData(prev => ({ ...prev, startTime: newValue.toDate() }));
+                  }
+                }}
+                slotProps={{
+                  textField: {
+                    fullWidth: true,
+                    error: !!errors.startTime,
+                    helperText: errors.startTime,
+                  },
+                }}
+              />
+            </Grid>
+
+            <Grid item xs={6}>
+              <DateTimePicker
+                label="End Date & Time"
+                value={dayjs(formData.endTime)}
+                onChange={(newValue) => {
+                  if (newValue) {
+                    setFormData(prev => ({ ...prev, endTime: newValue.toDate() }));
+                  }
+                }}
+                slotProps={{
+                  textField: {
+                    fullWidth: true,
+                    error: !!errors.endTime,
+                    helperText: errors.endTime,
+                  },
+                }}
+              />
+            </Grid>
+
+            {/* Description */}
+            <Grid item xs={12}>
+              <TextField
+                label="Description"
+                value={formData.description}
+                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                error={!!errors.description}
+                helperText={errors.description}
+                fullWidth
+                multiline
+                rows={3}
+                inputProps={{ maxLength: 2000 }}
+              />
+            </Grid>
+
+            {/* Location */}
+            <Grid item xs={12}>
+              <TextField
+                label="Location"
+                value={formData.location}
+                onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
+                fullWidth
+                InputProps={{
+                  startAdornment: <LocationOn sx={{ mr: 1, color: 'text.secondary' }} />,
+                }}
+              />
+            </Grid>
+
+            {/* Attendees */}
+            <Grid item xs={12}>
+              <Box>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <People sx={{ mr: 1, verticalAlign: 'middle' }} />
+                  Attendees
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1, mb: 1 }}>
+                  <TextField
+                    placeholder="Enter email address"
+                    value={attendeeInput}
+                    onChange={(e) => setAttendeeInput(e.target.value)}
+                    size="small"
+                    fullWidth
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddAttendee();
+                      }
+                    }}
+                  />
+                  <Button
+                    variant="outlined"
+                    onClick={handleAddAttendee}
+                    size="small"
+                    disabled={!attendeeInput.trim()}
+                  >
+                    Add
+                  </Button>
+                </Box>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {formData.attendees.map((email) => (
+                    <Chip
+                      key={email}
+                      label={email}
+                      onDelete={() => handleRemoveAttendee(email)}
+                      size="small"
+                      variant="outlined"
+                    />
+                  ))}
+                </Box>
+              </Box>
+            </Grid>
+
+            {/* Recurring Event Options */}
+            <Grid item xs={12}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={formData.isRecurring}
+                    onChange={(e) => {
+                      setFormData(prev => ({ ...prev, isRecurring: e.target.checked }));
+                      setShowRecurrenceOptions(e.target.checked);
+                    }}
+                  />
+                }
+                label={
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <Repeat sx={{ mr: 1 }} />
+                    Recurring Event
+                  </Box>
+                }
+              />
+
+              {showRecurrenceOptions && (
+                <Box sx={{ mt: 2, p: 2, border: '1px solid #e0e0e0', borderRadius: 1 }}>
+                  <Typography variant="body2" sx={{ mb: 2 }}>
+                    Recurrence Settings
+                  </Typography>
+                  
+                  <Grid container spacing={2}>
+                    <Grid item xs={6}>
+                      <FormControl fullWidth size="small">
+                        <InputLabel>Frequency</InputLabel>
+                        <Select
+                          value={recurrenceOptions.frequency}
+                          onChange={(e) => setRecurrenceOptions(prev => ({ 
+                            ...prev, 
+                            frequency: e.target.value as any 
+                          }))}
+                          label="Frequency"
+                        >
+                          <MenuItem value="daily">Daily</MenuItem>
+                          <MenuItem value="weekly">Weekly</MenuItem>
+                          <MenuItem value="monthly">Monthly</MenuItem>
+                          <MenuItem value="yearly">Yearly</MenuItem>
+                        </Select>
+                      </FormControl>
+                    </Grid>
+
+                    <Grid item xs={6}>
+                      <TextField
+                        label="Repeat every"
+                        type="number"
+                        value={recurrenceOptions.interval}
+                        onChange={(e) => setRecurrenceOptions(prev => ({ 
+                          ...prev, 
+                          interval: parseInt(e.target.value) || 1 
+                        }))}
+                        inputProps={{ min: 1, max: 99 }}
+                        size="small"
+                        fullWidth
+                      />
+                    </Grid>
+
+                    {recurrenceOptions.frequency === 'weekly' && (
+                      <Grid item xs={12}>
+                        <Typography variant="body2" sx={{ mb: 1 }}>
+                          Repeat on:
+                        </Typography>
+                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, index) => (
+                            <FormControlLabel
+                              key={day}
+                              control={
+                                <Checkbox
+                                  checked={recurrenceOptions.daysOfWeek?.includes(index) || false}
+                                  onChange={(e) => {
+                                    const days = recurrenceOptions.daysOfWeek || [];
+                                    if (e.target.checked) {
+                                      setRecurrenceOptions(prev => ({
+                                        ...prev,
+                                        daysOfWeek: [...days, index]
+                                      }));
+                                    } else {
+                                      setRecurrenceOptions(prev => ({
+                                        ...prev,
+                                        daysOfWeek: days.filter(d => d !== index)
+                                      }));
+                                    }
+                                  }}
+                                  size="small"
+                                />
+                              }
+                              label={day}
+                            />
+                          ))}
+                        </Box>
+                      </Grid>
+                    )}
+                  </Grid>
+                </Box>
+              )}
+            </Grid>
+          </Grid>
+        </DialogContent>
+
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          {isEditing && (
+            <Button
+              onClick={handleDelete}
+              color="error"
+              disabled={isSubmitting}
+            >
+              Delete
+            </Button>
+          )}
+          
+          <Box sx={{ flexGrow: 1 }} />
+          
+          <Button onClick={handleClose} disabled={isSubmitting}>
+            Cancel
+          </Button>
+          
+          <Button
+            onClick={handleSubmit}
+            variant="contained"
+            disabled={isSubmitting || !formData.title.trim()}
+          >
+            {isSubmitting ? 'Saving...' : (isEditing ? 'Update' : 'Create')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </LocalizationProvider>
+  );
+};
+
+export default EventModal; 

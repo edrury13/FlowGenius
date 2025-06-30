@@ -25,6 +25,27 @@ module.exports = {
     },
   ],
   plugins: [
+    // Temporarily disabled webpack plugin
+    // {
+    //   name: '@electron-forge/plugin-webpack',
+    //   config: {
+    //     mainConfig: './webpack.main.config.js',
+    //     renderer: {
+    //       config: './webpack.renderer.config.js',
+    //       entryPoints: [
+    //         {
+    //           html: './src/renderer/index.html',
+    //           js: './src/renderer/index.tsx',
+    //           name: 'main_window',
+    //           preload: {
+    //             js: './src/main/preload.ts',
+    //           },
+    //         },
+    //       ],
+    //     },
+    //     devContentSecurityPolicy: "default-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-eval' 'unsafe-inline' data:",
+    //   },
+    // },
     {
       name: '@electron-forge/plugin-auto-unpack-natives',
       config: {},

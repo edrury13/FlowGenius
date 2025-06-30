@@ -21,6 +21,8 @@ const createWindow = (): void => {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      webSecurity: false,
+      preload: path.join(__dirname, 'preload.js'),
     },
     icon: path.join(__dirname, '../../assets/icon.png'),
     show: false, // Don't show until ready-to-show
@@ -28,8 +30,10 @@ const createWindow = (): void => {
     frame: true,
   });
 
-  // Load the index.html of the app.
-  mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
+  // Load the HTML file directly
+  const htmlPath = path.join(__dirname, '../renderer/index.html');
+  console.log('Loading HTML from:', htmlPath);
+  mainWindow.loadFile(htmlPath);
 
   // Show window when ready
   mainWindow.once('ready-to-show', () => {

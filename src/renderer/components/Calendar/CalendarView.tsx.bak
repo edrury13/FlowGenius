@@ -1,0 +1,266 @@
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { Calendar, momentLocalizer, View, Views } from 'react-big-calendar';
+import moment from 'moment';
+import { Box, Typography, IconButton, Toolbar, Button, CircularProgress, Alert } from '@mui/material';
+import { ChevronLeft, ChevronRight, Today, Add } from '@mui/icons-material';
+import 'react-big-calendar/lib/css/react-big-calendar.css';
+
+import { useAppSelector, useAppDispatch } from '../../store/hooks';
+import { fetchEvents, setSelectedEvent } from '../../store/eventsSlice';
+import { setCurrentView, setSelectedDate, navigateDate, setShowEventModal } from '../../store/appSlice';
+import { Event } from '../../services/supabase';
+import { CalendarView as CalendarViewType } from '../../types';
+import type { RootState } from '../../store';
+
+// Install moment if not already installed
+// npm install moment @types/moment
+
+const localizer = momentLocalizer(moment);
+
+// Custom event component
+const EventComponent = ({ event }: { event: any }) => (
+  <Box sx={{ 
+    padding: '2px 4px', 
+    fontSize: '0.75rem',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap'
+  }}>
+    <strong>{event.title}</strong>
+    {event.location && (
+      <div style={{ fontSize: '0.65rem', opacity: 0.8 }}>
+        📍 {event.location}
+      </div>
+    )}
+  </Box>
+);
+
+// Convert calendar view types
+const viewMap: Record<CalendarViewType, View> = {
+  month: Views.MONTH,
+  week: Views.WEEK,
+  day: Views.DAY,
+  agenda: Views.AGENDA,
+};
+
+const CalendarView: React.FC = () => {
+  const dispatch = useAppDispatch();
+  const { user } = useAppSelector((state: any) => state.auth);
+  const { events, loading, error } = useAppSelector((state: any) => state.events);
+  const { currentView, selectedDate } = useAppSelector((state: any) => state.app);
+
+  // Convert events to calendar format
+  const calendarEvents = useMemo(() => {
+    return events.map((event: Event) => ({
+      id: event.id,
+      title: event.title,
+      start: new Date(event.start_time),
+      end: new Date(event.end_time),
+      resource: event,
+      location: event.location,
+      description: event.description,
+      attendees: event.attendees,
+    }));
+  }, [events]);
+
+  // Load events when component mounts or date changes
+  useEffect(() => {
+    if (user?.id) {
+      // Calculate date range based on current view
+      const startOfPeriod = moment(selectedDate).startOf(
+        currentView === 'month' ? 'month' : 
+        currentView === 'week' ? 'week' : 'day'
+      );
+      const endOfPeriod = moment(selectedDate).endOf(
+        currentView === 'month' ? 'month' : 
+        currentView === 'week' ? 'week' : 'day'
+      );
+
+      dispatch(fetchEvents({
+        userId: user.id,
+        startDate: startOfPeriod.toISOString(),
+        endDate: endOfPeriod.toISOString(),
+      }));
+    }
+  }, [dispatch, user?.id, selectedDate, currentView]);
+
+  // Event handlers
+  const handleSelectEvent = useCallback((event: any) => {
+    dispatch(setSelectedEvent(event.resource));
+    dispatch(setShowEventModal(true));
+  }, [dispatch]);
+
+  const handleSelectSlot = useCallback(({ start, end }: { start: Date; end: Date }) => {
+    // Create a new event with the selected time slot
+    dispatch(setSelectedEvent(null));
+    dispatch(setShowEventModal(true));
+    // TODO: Pre-fill the modal with start/end times
+  }, [dispatch]);
+
+  const handleNavigate = useCallback((date: Date) => {
+    dispatch(setSelectedDate(date));
+  }, [dispatch]);
+
+  const handleViewChange = useCallback((view: View) => {
+    const calendarView = Object.keys(viewMap).find(
+      key => viewMap[key as CalendarViewType] === view
+    ) as CalendarViewType;
+    if (calendarView) {
+      dispatch(setCurrentView(calendarView));
+    }
+  }, [dispatch]);
+
+  const handleNavigation = useCallback((direction: 'prev' | 'next' | 'today') => {
+    dispatch(navigateDate(direction));
+  }, [dispatch]);
+
+  const handleNewEvent = useCallback(() => {
+    dispatch(setSelectedEvent(null));
+    dispatch(setShowEventModal(true));
+  }, [dispatch]);
+
+  // Custom toolbar
+  const CustomToolbar = ({ label, onNavigate, onView }: any) => (
+    <Box sx={{ 
+      display: 'flex', 
+      justifyContent: 'space-between', 
+      alignItems: 'center',
+      mb: 2,
+      p: 1,
+      borderBottom: '1px solid #e0e0e0'
+    }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <IconButton onClick={() => handleNavigation('prev')} size="small">
+          <ChevronLeft />
+        </IconButton>
+        <IconButton onClick={() => handleNavigation('today')} size="small">
+          <Today />
+        </IconButton>
+        <IconButton onClick={() => handleNavigation('next')} size="small">
+          <ChevronRight />
+        </IconButton>
+        <Typography variant="h6" sx={{ ml: 2 }}>
+          {label}
+        </Typography>
+      </Box>
+      
+      <Box sx={{ display: 'flex', gap: 1 }}>
+        <Button 
+          variant={currentView === 'month' ? 'contained' : 'outlined'}
+          size="small"
+          onClick={() => handleViewChange(Views.MONTH)}
+        >
+          Month
+        </Button>
+        <Button 
+          variant={currentView === 'week' ? 'contained' : 'outlined'}
+          size="small"
+          onClick={() => handleViewChange(Views.WEEK)}
+        >
+          Week
+        </Button>
+        <Button 
+          variant={currentView === 'day' ? 'contained' : 'outlined'}
+          size="small"
+          onClick={() => handleViewChange(Views.DAY)}
+        >
+          Day
+        </Button>
+        <Button 
+          variant={currentView === 'agenda' ? 'contained' : 'outlined'}
+          size="small"
+          onClick={() => handleViewChange(Views.AGENDA)}
+        >
+          Agenda
+        </Button>
+      </Box>
+
+      <Button
+        variant="contained"
+        startIcon={<Add />}
+        onClick={handleNewEvent}
+        size="small"
+      >
+        New Event
+      </Button>
+    </Box>
+  );
+
+  if (loading && events.length === 0) {
+    return (
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100%' 
+      }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {error && (
+        <Alert 
+          severity="error" 
+          sx={{ mb: 2 }}
+          onClose={() => dispatch({ type: 'events/clearError' })}
+        >
+          {error}
+        </Alert>
+      )}
+
+      <Box sx={{ flexGrow: 1, minHeight: 0 }}>
+        <Calendar
+          localizer={localizer}
+          events={calendarEvents}
+          startAccessor="start"
+          endAccessor="end"
+          style={{ height: '100%' }}
+          view={viewMap[currentView]}
+          date={selectedDate}
+          onNavigate={handleNavigate}
+          onView={handleViewChange}
+          onSelectEvent={handleSelectEvent}
+          onSelectSlot={handleSelectSlot}
+          selectable
+          popup
+          showMultiDayTimes
+          components={{
+            toolbar: CustomToolbar,
+            event: EventComponent,
+          }}
+          formats={{
+            dayHeaderFormat: (date: Date) => moment(date).format('ddd M/D'),
+            dayRangeHeaderFormat: ({ start, end }: { start: Date; end: Date }) => 
+              `${moment(start).format('MMM D')} - ${moment(end).format('MMM D, YYYY')}`,
+            agendaDateFormat: (date: Date) => moment(date).format('ddd MMM D'),
+            agendaTimeFormat: (date: Date) => moment(date).format('h:mm A'),
+            agendaTimeRangeFormat: ({ start, end }: { start: Date; end: Date }) =>
+              `${moment(start).format('h:mm A')} - ${moment(end).format('h:mm A')}`,
+          }}
+          eventPropGetter={(event: any) => ({
+            style: {
+              backgroundColor: event.resource?.is_recurring ? '#ff9800' : '#1976d2',
+              borderColor: event.resource?.is_recurring ? '#f57c00' : '#1565c0',
+              color: 'white',
+              borderRadius: '4px',
+              border: 'none',
+            },
+          })}
+          dayPropGetter={(date: Date) => {
+            const isToday = moment(date).isSame(moment(), 'day');
+            return {
+              style: {
+                backgroundColor: isToday ? '#f3f4f6' : 'transparent',
+              },
+            };
+          }}
+        />
+      </Box>
+    </Box>
+  );
+};
+
+export default CalendarView; 
