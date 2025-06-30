@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import notificationService from './services/notifications';
 import gmailService from './services/gmail';
+import trackingService from './services/tracking';
+import ProductivityDashboard from './components/Analytics/ProductivityDashboard';
 
 interface Event {
   id: string;
@@ -63,6 +65,9 @@ const App: React.FC = () => {
   const [gmailConnected, setGmailConnected] = useState(false);
   const [gmailEmails, setGmailEmails] = useState<any[]>([]);
   const [loadingEmails, setLoadingEmails] = useState(false);
+  
+  // Analytics state
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   // Load events from localStorage on mount
   useEffect(() => {
@@ -113,12 +118,34 @@ const App: React.FC = () => {
     if (isConnected) {
       console.log('📧 Gmail already connected');
     }
+
+    // Initialize tracking service
+    const trackingSettings = trackingService.getSettings();
+    console.log('📊 Loaded tracking settings:', trackingSettings);
+    
+    // Auto-start tracking if enabled
+    if (trackingSettings.enabled) {
+      trackingService.startTracking();
+    }
   };
 
   // Save events to localStorage whenever events change
   useEffect(() => {
     localStorage.setItem('flowgenius-events', JSON.stringify(events));
   }, [events]);
+
+  // Cleanup tracking service on logout or unmount
+  useEffect(() => {
+    return () => {
+      trackingService.cleanup();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isLoggedIn) {
+      trackingService.stopTracking();
+    }
+  }, [isLoggedIn]);
 
   // Filter events based on search and category
   useEffect(() => {
@@ -844,6 +871,27 @@ const App: React.FC = () => {
       borderRadius: '4px',
       backgroundColor: 'white',
     },
+    activeButton: {
+      backgroundColor: '#667eea',
+      color: 'white',
+    },
+    mainContent: {
+      display: 'flex',
+      height: 'calc(100vh - 60px)',
+      overflow: 'hidden',
+    },
+    calendarWithAnalytics: {
+      width: '70%',
+      paddingRight: '20px',
+    },
+    analyticsPane: {
+      width: '30%',
+      minWidth: '400px',
+      backgroundColor: '#f8f9fa',
+      borderLeft: '1px solid #e0e0e0',
+      overflow: 'auto',
+      height: '100%',
+    },
   };
 
   const renderMonthView = () => {
@@ -1133,6 +1181,13 @@ const App: React.FC = () => {
               🔔
             </button>
             <button 
+              style={{...styles.headerButton, ...(showAnalytics ? styles.activeButton : {})}}
+              onClick={() => setShowAnalytics(!showAnalytics)}
+              title="Productivity Analytics"
+            >
+              📊
+            </button>
+            <button 
               style={styles.logoutButton}
               onClick={() => setIsLoggedIn(false)}
             >
@@ -1141,7 +1196,11 @@ const App: React.FC = () => {
           </div>
         </div>
         
-        <div style={styles.calendarContainer}>
+        <div style={styles.mainContent}>
+          <div style={{
+            ...styles.calendarContainer,
+            ...(showAnalytics ? styles.calendarWithAnalytics : {}),
+          }}>
           {/* Controls */}
           <div style={styles.calendarControls}>
             <div style={styles.searchAndFilter}>
@@ -1225,9 +1284,20 @@ const App: React.FC = () => {
             {renderCalendarView()}
           </div>
           
-          <div style={{ marginTop: '20px', textAlign: 'center', color: '#666' }}>
-            Click on any day to create a new event • Click events to edit them
+            <div style={{ marginTop: '20px', textAlign: 'center', color: '#666' }}>
+              Click on any day to create a new event • Click events to edit them
+            </div>
           </div>
+          
+          {/* Analytics Pane */}
+          {showAnalytics && (
+            <div style={styles.analyticsPane}>
+              <ProductivityDashboard 
+                isVisible={true}
+                onClose={() => setShowAnalytics(false)}
+              />
+            </div>
+          )}
         </div>
 
         {/* Event Creation/Edit Modal */}
@@ -1486,6 +1556,8 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+
+
       </div>
     );
   }
