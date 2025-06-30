@@ -24,201 +24,243 @@ export interface EventReminder {
   reminderMinutes: number;
 }
 
+interface NotificationSettings {
+  eventReminders: boolean;
+  reminderTimes: number[]; // minutes before event
+  productivityInsights: boolean;
+  emailNotifications: boolean;
+  soundEnabled: boolean;
+}
+
+interface ScheduledNotification {
+  id: string;
+  eventId: string;
+  title: string;
+  message: string;
+  scheduledTime: Date;
+  type: 'reminder' | 'productivity' | 'system';
+}
+
 class NotificationService {
-  private scheduledReminders: Map<string, NodeJS.Timeout> = new Map();
-  private defaultReminderTimes: number[] = [15, 5]; // minutes before event
+  private settings: NotificationSettings;
+  private scheduledNotifications: Map<string, NodeJS.Timeout>;
+  private defaultSettings: NotificationSettings = {
+    eventReminders: true,
+    reminderTimes: [15, 5], // 15 and 5 minutes before
+    productivityInsights: true,
+    emailNotifications: false,
+    soundEnabled: true
+  };
 
   constructor() {
+    this.scheduledNotifications = new Map();
+    this.settings = this.loadSettings();
     this.requestPermission();
   }
 
-  // Request notification permission
-  async requestPermission(): Promise<boolean> {
-    if (!('Notification' in window)) {
-      console.warn('This browser does not support desktop notifications');
-      return false;
+  private async requestPermission(): Promise<void> {
+    if ('Notification' in window) {
+      if (Notification.permission === 'default') {
+        await Notification.requestPermission();
+      }
     }
-
-    if (Notification.permission === 'granted') {
-      return true;
-    }
-
-    if (Notification.permission !== 'denied') {
-      const permission = await Notification.requestPermission();
-      return permission === 'granted';
-    }
-
-    return false;
   }
 
-  // Show desktop notification
-  async showNotification(options: NotificationOptions): Promise<void> {
-    const hasPermission = await this.requestPermission();
-    
-    if (!hasPermission) {
-      console.warn('Notification permission not granted');
+  private loadSettings(): NotificationSettings {
+    try {
+      const saved = localStorage.getItem('notificationSettings');
+      return saved ? { ...this.defaultSettings, ...JSON.parse(saved) } : this.defaultSettings;
+    } catch {
+      return this.defaultSettings;
+    }
+  }
+
+  private saveSettings(): void {
+    localStorage.setItem('notificationSettings', JSON.stringify(this.settings));
+  }
+
+  public updateSettings(newSettings: Partial<NotificationSettings>): void {
+    this.settings = { ...this.settings, ...newSettings };
+    this.saveSettings();
+    console.log('📋 Notification settings updated:', this.settings);
+  }
+
+  public getSettings(): NotificationSettings {
+    return { ...this.settings };
+  }
+
+  public async showNotification(
+    title: string, 
+    message: string, 
+    options: {
+      type?: 'reminder' | 'productivity' | 'system';
+      icon?: string;
+      requireInteraction?: boolean;
+    } = {}
+  ): Promise<void> {
+    if (!this.settings.eventReminders && options.type === 'reminder') {
       return;
     }
 
-    // Use Electron's notification API if available
-    if (window.electronAPI) {
-      await window.electronAPI.showNotification({
-        title: options.title,
-        body: options.body,
+    if (!this.settings.productivityInsights && options.type === 'productivity') {
+      return;
+    }
+
+    // Try native web notification first
+    if ('Notification' in window && Notification.permission === 'granted') {
+      const notification = new Notification(title, {
+        body: message,
+        icon: options.icon || '/assets/icon.png',
+        badge: '/assets/badge.png',
+        requireInteraction: options.requireInteraction || false,
+        silent: !this.settings.soundEnabled,
+        tag: options.type || 'default'
       });
+
+      notification.onclick = () => {
+        // Bring app to focus
+        window.focus();
+        notification.close();
+      };
+
+      // Auto-close after 10 seconds unless requires interaction
+      if (!options.requireInteraction) {
+        setTimeout(() => notification.close(), 10000);
+      }
     } else {
-      // Fallback to browser notification
-      new Notification(options.title, {
-        body: options.body,
-        icon: options.icon,
-        tag: options.tag,
-        requireInteraction: options.requireInteraction,
-      });
+      // Fallback to in-app notification
+      this.showInAppNotification(title, message, options);
     }
+
+    console.log(`🔔 Notification shown: ${title} - ${message}`);
   }
 
-  // Schedule event reminders
-  scheduleEventReminders(event: Event, reminderTimes?: number[]): void {
-    const reminders = reminderTimes || this.defaultReminderTimes;
-    const eventStart = dayjs(event.start_time);
-    const now = dayjs();
+  private showInAppNotification(
+    title: string, 
+    message: string, 
+    options: any
+  ): void {
+    // Create in-app notification element
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      max-width: 300px;
+      z-index: 10000;
+      font-family: Arial, sans-serif;
+      animation: slideIn 0.3s ease-out;
+    `;
 
-    reminders.forEach(minutes => {
-      const reminderTime = eventStart.subtract(minutes, 'minute');
-      
-      // Only schedule if reminder time is in the future
-      if (reminderTime.isAfter(now)) {
-        const timeoutId = setTimeout(() => {
-          this.showEventReminder(event, minutes);
-        }, reminderTime.diff(now));
+    notification.innerHTML = `
+      <div style="font-weight: bold; margin-bottom: 8px; color: #333;">${title}</div>
+      <div style="color: #666; font-size: 14px; margin-bottom: 12px;">${message}</div>
+      <div style="text-align: right;">
+        <button onclick="this.parentElement.parentElement.remove()" 
+                style="background: #667eea; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+          OK
+        </button>
+      </div>
+    `;
 
-        const reminderId = `${event.id}-${minutes}`;
-        this.scheduledReminders.set(reminderId, timeoutId);
+    // Add CSS animation
+    const style = document.createElement('style');
+    style.textContent = `
+      @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
       }
-    });
-  }
+    `;
+    if (!document.querySelector('[data-notification-styles]')) {
+      style.setAttribute('data-notification-styles', 'true');
+      document.head.appendChild(style);
+    }
 
-  // Show event reminder notification
-  private async showEventReminder(event: Event, minutesBefore: number): Promise<void> {
-    const startTime = dayjs(event.start_time).format('h:mm A');
-    const title = `Event Reminder - ${minutesBefore} minutes`;
-    const body = `${event.title} starts at ${startTime}`;
+    document.body.appendChild(notification);
 
-    await this.showNotification({
-      title,
-      body,
-      requireInteraction: true,
-      tag: `reminder-${event.id}`,
-      actions: [
-        {
-          action: 'snooze',
-          title: 'Snooze 5 min',
-        },
-        {
-          action: 'dismiss',
-          title: 'Dismiss',
-        },
-      ],
-    });
-  }
-
-  // Cancel event reminders
-  cancelEventReminders(eventId: string): void {
-    const keysToDelete: string[] = [];
-    
-    this.scheduledReminders.forEach((timeoutId, key) => {
-      if (key.startsWith(eventId)) {
-        clearTimeout(timeoutId);
-        keysToDelete.push(key);
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+      if (notification.parentElement) {
+        notification.remove();
       }
-    });
-
-    keysToDelete.forEach(key => {
-      this.scheduledReminders.delete(key);
-    });
+    }, 5000);
   }
 
-  // Reschedule event reminders (useful when event is updated)
-  rescheduleEventReminders(event: Event, reminderTimes?: number[]): void {
+  public scheduleEventReminder(event: {
+    id: string;
+    title: string;
+    date: string;
+    startTime?: string;
+  }): void {
+    if (!this.settings.eventReminders) return;
+
+    // Clear existing reminders for this event
     this.cancelEventReminders(event.id);
-    this.scheduleEventReminders(event, reminderTimes);
-  }
 
-  // Schedule multiple events
-  scheduleMultipleEvents(events: Event[], reminderTimes?: number[]): void {
-    events.forEach(event => {
-      this.scheduleEventReminders(event, reminderTimes);
+    const eventDateTime = new Date(`${event.date}T${event.startTime || '09:00'}`);
+    const now = new Date();
+
+    this.settings.reminderTimes.forEach((minutes) => {
+      const reminderTime = new Date(eventDateTime.getTime() - (minutes * 60 * 1000));
+      
+      if (reminderTime > now) {
+        const timeoutId = setTimeout(() => {
+          this.showNotification(
+            `📅 Upcoming Event`,
+            `"${event.title}" starts in ${minutes} minutes`,
+            {
+              type: 'reminder',
+              requireInteraction: true
+            }
+          );
+        }, reminderTime.getTime() - now.getTime());
+
+        const notificationId = `${event.id}-${minutes}`;
+        this.scheduledNotifications.set(notificationId, timeoutId);
+        
+        console.log(`⏰ Scheduled reminder for "${event.title}" in ${Math.floor((reminderTime.getTime() - now.getTime()) / 1000 / 60)} minutes`);
+      }
     });
   }
 
-  // Snooze reminder
-  snoozeReminder(eventId: string, snoozeMinutes: number = 5): void {
-    const timeoutId = setTimeout(() => {
-      // Re-fetch event and show reminder again
-      // This would typically involve calling the event service
-      console.log(`Showing snoozed reminder for event ${eventId}`);
-    }, snoozeMinutes * 60 * 1000);
-
-    const reminderId = `${eventId}-snooze`;
-    this.scheduledReminders.set(reminderId, timeoutId);
-  }
-
-  // Show productivity insights notification
-  async showProductivityInsight(insight: string): Promise<void> {
-    await this.showNotification({
-      title: 'FlowGenius Productivity Insight',
-      body: insight,
-      tag: 'productivity-insight',
-    });
-  }
-
-  // Show daily summary notification
-  async showDailySummary(summary: {
-    eventsCompleted: number;
-    totalFocusTime: number;
-    topApp: string;
-  }): Promise<void> {
-    const { eventsCompleted, totalFocusTime, topApp } = summary;
-    const focusHours = Math.round(totalFocusTime / 3600);
-    
-    const body = `Today: ${eventsCompleted} events completed, ${focusHours}h focus time. Most used: ${topApp}`;
-    
-    await this.showNotification({
-      title: 'Daily Summary',
-      body,
-      tag: 'daily-summary',
-    });
-  }
-
-  // Clear all scheduled reminders
-  clearAllReminders(): void {
-    this.scheduledReminders.forEach(timeoutId => {
-      clearTimeout(timeoutId);
-    });
-    this.scheduledReminders.clear();
-  }
-
-  // Get scheduled reminders count
-  getScheduledRemindersCount(): number {
-    return this.scheduledReminders.size;
-  }
-
-  // Check if notifications are supported
-  isSupported(): boolean {
-    return 'Notification' in window || !!(window as any).electronAPI;
-  }
-
-  // Get permission status
-  getPermissionStatus(): NotificationPermission | 'unsupported' {
-    if (!('Notification' in window)) {
-      return 'unsupported';
+  public cancelEventReminders(eventId: string): void {
+    // Find and cancel all reminders for this event
+    for (const [notificationId, timeoutId] of this.scheduledNotifications.entries()) {
+      if (notificationId.startsWith(eventId)) {
+        clearTimeout(timeoutId);
+        this.scheduledNotifications.delete(notificationId);
+        console.log(`❌ Cancelled reminder: ${notificationId}`);
+      }
     }
-    return Notification.permission;
+  }
+
+  public showProductivityInsight(message: string): void {
+    if (this.settings.productivityInsights) {
+      this.showNotification(
+        '📊 Productivity Insight',
+        message,
+        { type: 'productivity' }
+      );
+    }
+  }
+
+  public cleanup(): void {
+    // Cancel all scheduled notifications
+    for (const timeoutId of this.scheduledNotifications.values()) {
+      clearTimeout(timeoutId);
+    }
+    this.scheduledNotifications.clear();
+    console.log('🧹 Notification service cleaned up');
   }
 }
 
-// Create singleton instance
-export const notificationService = new NotificationService();
+// Singleton instance
+const notificationService = new NotificationService();
 
-// Export for easy access
-export default notificationService; 
+export default notificationService;
+export type { NotificationSettings, ScheduledNotification }; 

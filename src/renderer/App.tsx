@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react';
+import notificationService from './services/notifications';
+import gmailService from './services/gmail';
 
 interface Event {
   id: string;
@@ -55,6 +57,13 @@ const App: React.FC = () => {
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
 
+  // Notification and Gmail state
+  const [showNotificationSettings, setShowNotificationSettings] = useState(false);
+  const [showGmailIntegration, setShowGmailIntegration] = useState(false);
+  const [gmailConnected, setGmailConnected] = useState(false);
+  const [gmailEmails, setGmailEmails] = useState<any[]>([]);
+  const [loadingEmails, setLoadingEmails] = useState(false);
+
   // Load events from localStorage on mount
   useEffect(() => {
     const savedEvents = localStorage.getItem('flowgenius-events');
@@ -88,7 +97,23 @@ const App: React.FC = () => {
       setFilteredEvents(sampleEvents);
       localStorage.setItem('flowgenius-events', JSON.stringify(sampleEvents));
     }
+
+    // Initialize notification service and Gmail
+    initializeServices();
   }, []);
+
+  const initializeServices = async () => {
+    // Load notification settings
+    const settings = notificationService.getSettings();
+    console.log('📋 Loaded notification settings:', settings);
+
+    // Check Gmail connection
+    const isConnected = await gmailService.loadStoredTokens();
+    setGmailConnected(isConnected);
+    if (isConnected) {
+      console.log('📧 Gmail already connected');
+    }
+  };
 
   // Save events to localStorage whenever events change
   useEffect(() => {
@@ -239,6 +264,9 @@ const App: React.FC = () => {
     if (editingEvent) {
       console.log('🔧 Updating event:', editingEvent.id, 'New recurrence:', isRecurring);
       
+      // Cancel existing reminders
+      notificationService.cancelEventReminders(editingEvent.id);
+      
       // Remove all existing instances of this event (original + any recurring instances)
       const eventsWithoutThisEvent = events.filter(event => 
         event.id !== editingEvent.id && event.parentEventId !== editingEvent.id
@@ -247,6 +275,11 @@ const App: React.FC = () => {
       // Generate new event(s) based on current settings
       const newEvents = generateRecurringEvents(eventData);
       
+      // Schedule notifications for new events
+      newEvents.forEach(event => {
+        notificationService.scheduleEventReminder(event);
+      });
+      
       // Update the events array
       setEvents([...eventsWithoutThisEvent, ...newEvents]);
       
@@ -254,6 +287,12 @@ const App: React.FC = () => {
     } else {
       // Create new event(s)
       const newEvents = generateRecurringEvents(eventData);
+      
+      // Schedule notifications for new events
+      newEvents.forEach(event => {
+        notificationService.scheduleEventReminder(event);
+      });
+      
       setEvents([...events, ...newEvents]);
     }
 
@@ -264,6 +303,9 @@ const App: React.FC = () => {
 
   const handleDeleteEvent = (eventId: string) => {
     if (confirm('Are you sure you want to delete this event?')) {
+      // Cancel notifications for this event
+      notificationService.cancelEventReminders(eventId);
+      
       const updatedEvents = events.filter(event => 
         event.id !== eventId && event.parentEventId !== eventId
       );
@@ -298,6 +340,111 @@ const App: React.FC = () => {
     const start = startDate.toISOString().split('T')[0];
     const end = endDate.toISOString().split('T')[0];
     return filteredEvents.filter(event => event.date >= start && event.date <= end);
+  };
+
+  // Gmail Integration Functions
+  const handleGmailConnect = async () => {
+    try {
+      const success = await gmailService.authenticate();
+      if (success) {
+        setGmailConnected(true);
+        notificationService.showNotification(
+          '📧 Gmail Connected',
+          'Successfully connected to Gmail! You can now import events from emails.',
+          { type: 'system' }
+        );
+      }
+    } catch (error) {
+      console.error('Gmail connection failed:', error);
+      notificationService.showNotification(
+        '❌ Gmail Connection Failed',
+        'Failed to connect to Gmail. Please try again.',
+        { type: 'system' }
+      );
+    }
+  };
+
+  const handleGmailDisconnect = () => {
+    gmailService.clearStoredTokens();
+    setGmailConnected(false);
+    setGmailEmails([]);
+    notificationService.showNotification(
+      '📧 Gmail Disconnected',
+      'Gmail has been disconnected from FlowGenius.',
+      { type: 'system' }
+    );
+  };
+
+  const handleImportFromGmail = async () => {
+    if (!gmailConnected) {
+      alert('Please connect Gmail first');
+      return;
+    }
+
+    setLoadingEmails(true);
+    try {
+      const emails = await gmailService.getRecentEmails(10);
+      setGmailEmails(emails);
+      
+      // Extract events from emails
+      let totalEventsImported = 0;
+      const newEvents: Event[] = [];
+
+      for (const email of emails) {
+        const extractedEvents = gmailService.extractEventsFromEmail(email);
+        for (const emailEvent of extractedEvents) {
+          const calendarEvent = gmailService.convertToCalendarEvent(emailEvent);
+          newEvents.push(calendarEvent);
+          totalEventsImported++;
+        }
+      }
+
+      if (newEvents.length > 0) {
+        // Schedule notifications for imported events
+        newEvents.forEach(event => {
+          notificationService.scheduleEventReminder(event);
+        });
+
+        setEvents(prev => [...prev, ...newEvents]);
+        notificationService.showNotification(
+          '📅 Events Imported',
+          `Successfully imported ${totalEventsImported} events from Gmail!`,
+          { type: 'system' }
+        );
+      } else {
+        notificationService.showNotification(
+          '📧 No Events Found',
+          'No calendar events were found in recent emails.',
+          { type: 'system' }
+        );
+      }
+    } catch (error) {
+      console.error('Failed to import from Gmail:', error);
+      notificationService.showNotification(
+        '❌ Import Failed',
+        'Failed to import events from Gmail.',
+        { type: 'system' }
+      );
+    }
+    setLoadingEmails(false);
+  };
+
+  // Notification Settings Functions
+  const handleNotificationSettingsUpdate = (newSettings: any) => {
+    notificationService.updateSettings(newSettings);
+    notificationService.showNotification(
+      '⚙️ Settings Updated',
+      'Notification settings have been saved.',
+      { type: 'system' }
+    );
+  };
+
+  const testNotification = () => {
+    notificationService.showNotification(
+      '🔔 Test Notification',
+      'This is a test notification from FlowGenius!',
+      { type: 'system', requireInteraction: false }
+    );
   };
 
   const styles = {
@@ -380,6 +527,23 @@ const App: React.FC = () => {
       border: 'none',
       borderRadius: '4px',
       cursor: 'pointer',
+    },
+    headerButton: {
+      padding: '6px 12px',
+      backgroundColor: '#f0f0f0',
+      color: '#333',
+      border: '1px solid #ddd',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      fontSize: '14px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '4px',
+    },
+    connectedButton: {
+      backgroundColor: '#e8f5e8',
+      borderColor: '#4caf50',
+      color: '#2e7d32',
     },
     calendarContainer: {
       padding: '20px',
@@ -666,6 +830,20 @@ const App: React.FC = () => {
       backgroundColor: '#e53e3e',
       color: 'white',
     },
+    settingsSection: {
+      marginBottom: '20px',
+      padding: '16px',
+      border: '1px solid #e0e0e0',
+      borderRadius: '6px',
+      backgroundColor: '#fafafa',
+    },
+    emailItem: {
+      padding: '10px',
+      marginBottom: '8px',
+      border: '1px solid #e0e0e0',
+      borderRadius: '4px',
+      backgroundColor: 'white',
+    },
   };
 
   const renderMonthView = () => {
@@ -938,8 +1116,22 @@ const App: React.FC = () => {
       <div style={styles.dashboard}>
         <div style={styles.header}>
           <div style={styles.headerTitle}>🚀 FlowGenius</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
             <span>Welcome, {email}</span>
+            <button 
+              style={{...styles.headerButton, ...(gmailConnected ? styles.connectedButton : {})}}
+              onClick={() => setShowGmailIntegration(true)}
+              title={gmailConnected ? 'Gmail Connected - Click to manage' : 'Connect Gmail'}
+            >
+              📧 Gmail {gmailConnected && '✓'}
+            </button>
+            <button 
+              style={styles.headerButton}
+              onClick={() => setShowNotificationSettings(true)}
+              title="Notification Settings"
+            >
+              🔔
+            </button>
             <button 
               style={styles.logoutButton}
               onClick={() => setIsLoggedIn(false)}
@@ -1154,6 +1346,143 @@ const App: React.FC = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Notification Settings Modal */}
+        {showNotificationSettings && (
+          <div style={styles.modalOverlay} onClick={() => setShowNotificationSettings(false)}>
+            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+              <div style={styles.modalHeader}>
+                <span>🔔 Notification Settings</span>
+              </div>
+              
+              <div style={styles.modalForm}>
+                <div style={styles.settingsSection}>
+                  <h4>Event Reminders</h4>
+                  <label style={styles.modalCheckbox}>
+                    <input
+                      type="checkbox"
+                      checked={notificationService.getSettings().eventReminders}
+                      onChange={(e) => handleNotificationSettingsUpdate({ eventReminders: e.target.checked })}
+                    />
+                    Enable event reminders
+                  </label>
+                  
+                  <label style={styles.modalCheckbox}>
+                    <input
+                      type="checkbox"
+                      checked={notificationService.getSettings().soundEnabled}
+                      onChange={(e) => handleNotificationSettingsUpdate({ soundEnabled: e.target.checked })}
+                    />
+                    Enable notification sounds
+                  </label>
+                  
+                  <label style={styles.modalCheckbox}>
+                    <input
+                      type="checkbox"
+                      checked={notificationService.getSettings().productivityInsights}
+                      onChange={(e) => handleNotificationSettingsUpdate({ productivityInsights: e.target.checked })}
+                    />
+                    Enable productivity insights
+                  </label>
+                </div>
+
+                <div style={styles.settingsSection}>
+                  <h4>Test Notifications</h4>
+                  <button 
+                    type="button"
+                    style={{...styles.modalButton, ...styles.primaryButton}}
+                    onClick={testNotification}
+                  >
+                    Send Test Notification
+                  </button>
+                </div>
+                
+                <div style={styles.modalButtons}>
+                  <button 
+                    type="button"
+                    style={{...styles.modalButton, ...styles.secondaryButton}}
+                    onClick={() => setShowNotificationSettings(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Gmail Integration Modal */}
+        {showGmailIntegration && (
+          <div style={styles.modalOverlay} onClick={() => setShowGmailIntegration(false)}>
+            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+              <div style={styles.modalHeader}>
+                <span>📧 Gmail Integration</span>
+              </div>
+              
+              <div style={styles.modalForm}>
+                <div style={styles.settingsSection}>
+                  <h4>Connection Status</h4>
+                  <p style={{ color: gmailConnected ? '#4caf50' : '#f44336', fontWeight: 'bold' }}>
+                    {gmailConnected ? '✅ Connected to Gmail' : '❌ Not Connected'}
+                  </p>
+                  
+                  {!gmailConnected ? (
+                    <div>
+                      <p>Connect Gmail to automatically import calendar events from your emails.</p>
+                      <button 
+                        style={{...styles.modalButton, ...styles.primaryButton}}
+                        onClick={handleGmailConnect}
+                      >
+                        Connect Gmail
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <button 
+                        style={{...styles.modalButton, ...styles.primaryButton}}
+                        onClick={handleImportFromGmail}
+                        disabled={loadingEmails}
+                      >
+                        {loadingEmails ? 'Importing...' : 'Import Recent Events'}
+                      </button>
+                      <button 
+                        style={{...styles.modalButton, ...styles.dangerButton}}
+                        onClick={handleGmailDisconnect}
+                      >
+                        Disconnect Gmail
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {gmailEmails.length > 0 && (
+                  <div style={styles.settingsSection}>
+                    <h4>Recent Emails ({gmailEmails.length})</h4>
+                    <div style={{ maxHeight: '200px', overflow: 'auto' }}>
+                      {gmailEmails.map((email, index) => (
+                        <div key={email.id || index} style={styles.emailItem}>
+                          <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{email.subject}</div>
+                          <div style={{ fontSize: '12px', color: '#666' }}>From: {email.from}</div>
+                          <div style={{ fontSize: '12px', color: '#999' }}>{email.snippet}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                <div style={styles.modalButtons}>
+                  <button 
+                    type="button"
+                    style={{...styles.modalButton, ...styles.secondaryButton}}
+                    onClick={() => setShowGmailIntegration(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
