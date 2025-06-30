@@ -3,6 +3,9 @@ import notificationService from './services/notifications';
 import gmailService from './services/gmail';
 import trackingService from './services/tracking';
 import ProductivityDashboard from './components/Analytics/ProductivityDashboard';
+import AuthModal from './components/Auth/AuthModal';
+import { authService, type Profile } from './services/supabase';
+import type { User, Session } from '@supabase/supabase-js';
 
 interface Event {
   id: string;
@@ -33,9 +36,14 @@ const CATEGORY_COLORS = {
 };
 
 const App: React.FC = () => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  // Authentication state
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [userProfile, setUserProfile] = useState<Profile | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   
   // Calendar state
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -103,11 +111,49 @@ const App: React.FC = () => {
       localStorage.setItem('flowgenius-events', JSON.stringify(sampleEvents));
     }
 
-    // Initialize notification service and Gmail
+    // Initialize services and setup auth listener
     initializeServices();
+
+    // Listen to auth state changes
+    const { data: { subscription } } = authService.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth state changed:', event, session);
+        
+        if (event === 'SIGNED_IN' && session?.user) {
+          await handleAuthSuccess(session.user);
+          setSession(session);
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setSession(null);
+          setUserProfile(null);
+          setIsLoggedIn(false);
+          setShowAuthModal(true);
+        }
+      }
+    );
+
+    // Cleanup subscription on unmount
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const initializeServices = async () => {
+    setAuthLoading(true);
+    
+    try {
+      // Check for existing session
+      const currentSession = await authService.getCurrentSession();
+      if (currentSession?.user) {
+        await handleAuthSuccess(currentSession.user);
+      } else {
+        setShowAuthModal(true);
+      }
+    } catch (error) {
+      console.error('Failed to initialize auth:', error);
+      setShowAuthModal(true);
+    }
+
     // Load notification settings
     const settings = notificationService.getSettings();
     console.log('📋 Loaded notification settings:', settings);
@@ -123,10 +169,7 @@ const App: React.FC = () => {
     const trackingSettings = trackingService.getSettings();
     console.log('📊 Loaded tracking settings:', trackingSettings);
     
-    // Auto-start tracking if enabled
-    if (trackingSettings.enabled) {
-      trackingService.startTracking();
-    }
+    setAuthLoading(false);
   };
 
   // Save events to localStorage whenever events change
@@ -165,12 +208,45 @@ const App: React.FC = () => {
     setFilteredEvents(filtered);
   }, [events, searchTerm, selectedCategory]);
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (email && password) {
-      setIsLoggedIn(true);
-    } else {
-      alert('Please enter email and password');
+  const handleAuthSuccess = async (user: User) => {
+    setUser(user);
+    setIsLoggedIn(true);
+    setShowAuthModal(false);
+    setAuthError(null);
+    
+    try {
+      // Load user profile
+      const profile = await import('./services/supabase').then(module => 
+        module.profileService.getProfile(user.id)
+      );
+      setUserProfile(profile);
+    } catch (error) {
+      console.error('Failed to load user profile:', error);
+    }
+
+    // Initialize tracking if enabled
+    const trackingSettings = trackingService.getSettings();
+    if (trackingSettings.enabled) {
+      trackingService.startTracking();
+    }
+  };
+
+  const handleAuthError = (message: string) => {
+    setAuthError(message);
+    console.error('Auth error:', message);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await authService.signOut();
+      setUser(null);
+      setSession(null);
+      setUserProfile(null);
+      setIsLoggedIn(false);
+      setShowAuthModal(true);
+      trackingService.stopTracking();
+    } catch (error) {
+      console.error('Logout error:', error);
     }
   };
 
@@ -533,14 +609,19 @@ const App: React.FC = () => {
       minHeight: '100vh',
       backgroundColor: '#f5f5f5',
       fontFamily: 'Arial, sans-serif',
+      width: '100%',
+      margin: 0,
+      padding: 0,
     },
     header: {
       backgroundColor: 'white',
-      padding: '20px',
+      padding: '15px 20px',
       boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
+      width: '100%',
+      boxSizing: 'border-box' as const,
     },
     headerTitle: {
       fontSize: '24px',
@@ -573,17 +654,22 @@ const App: React.FC = () => {
       color: '#2e7d32',
     },
     calendarContainer: {
-      padding: '20px',
-      maxWidth: '1400px',
-      margin: '0 auto',
+      padding: '15px',
+      flex: 1,
+      width: '100%',
+      display: 'flex',
+      flexDirection: 'column' as const,
+      overflow: 'hidden',
+      boxSizing: 'border-box' as const,
     },
     calendarControls: {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: '20px',
+      marginBottom: '10px',
       flexWrap: 'wrap' as const,
-      gap: '15px',
+      gap: '10px',
+      flexShrink: 0,
     },
     searchAndFilter: {
       display: 'flex',
@@ -614,7 +700,8 @@ const App: React.FC = () => {
       display: 'flex',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: '20px',
+      marginBottom: '10px',
+      flexShrink: 0,
     },
     calendarTitle: {
       fontSize: '32px',
@@ -654,47 +741,66 @@ const App: React.FC = () => {
       backgroundColor: 'white',
       borderRadius: '8px',
       boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-      padding: '20px',
+      padding: '15px',
+      width: '100%',
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column' as const,
+      overflow: 'hidden',
+      boxSizing: 'border-box' as const,
     },
     calendarGrid: {
       display: 'grid',
       gridTemplateColumns: 'repeat(7, 1fr)',
+      gridTemplateRows: 'auto repeat(6, 1fr)',
       gap: '1px',
       backgroundColor: '#e0e0e0',
+      width: '100%',
+      flex: 1,
+      minHeight: 0,
     },
     weekGrid: {
       display: 'grid',
       gridTemplateColumns: 'repeat(7, 1fr)',
+      gridTemplateRows: 'auto 1fr',
       gap: '1px',
       backgroundColor: '#e0e0e0',
+      width: '100%',
+      flex: 1,
+      minHeight: 0,
     },
     dayView: {
       display: 'flex',
       flexDirection: 'column' as const,
       gap: '10px',
+      flex: 1,
+      overflow: 'auto',
     },
     agendaView: {
       display: 'flex',
       flexDirection: 'column' as const,
       gap: '15px',
-      maxHeight: '600px',
-      overflowY: 'auto' as const,
+      flex: 1,
+      overflow: 'auto',
     },
     dayHeader: {
       backgroundColor: '#667eea',
       color: 'white',
-      padding: '15px',
+      padding: '12px 8px',
       textAlign: 'center' as const,
       fontWeight: 'bold',
+      fontSize: '14px',
     },
     dayCell: {
       backgroundColor: 'white',
-      padding: '15px',
-      minHeight: '120px',
+      padding: '8px',
       border: '1px solid #e0e0e0',
       cursor: 'pointer',
       transition: 'background-color 0.2s',
       position: 'relative' as const,
+      display: 'flex',
+      flexDirection: 'column' as const,
+      overflow: 'hidden',
     },
     dayCellWeek: {
       backgroundColor: 'white',
@@ -712,20 +818,22 @@ const App: React.FC = () => {
     },
     dayNumber: {
       fontWeight: 'bold',
-      marginBottom: '8px',
-      fontSize: '16px',
+      marginBottom: '4px',
+      fontSize: '14px',
+      flexShrink: 0,
     },
     event: {
-      padding: '4px 8px',
-      borderRadius: '4px',
-      fontSize: '11px',
-      marginBottom: '4px',
+      padding: '2px 6px',
+      borderRadius: '3px',
+      fontSize: '10px',
+      marginBottom: '2px',
       cursor: 'pointer',
       overflow: 'hidden',
       textOverflow: 'ellipsis',
       whiteSpace: 'nowrap' as const,
       color: 'white',
       position: 'relative' as const,
+      flexShrink: 0,
     },
     eventTime: {
       fontSize: '10px',
@@ -877,12 +985,18 @@ const App: React.FC = () => {
     },
     mainContent: {
       display: 'flex',
-      height: 'calc(100vh - 60px)',
+      height: 'calc(100vh - 80px)',
       overflow: 'hidden',
+      width: '100%',
     },
     calendarWithAnalytics: {
       width: '70%',
-      paddingRight: '20px',
+      paddingRight: '15px',
+      boxSizing: 'border-box' as const,
+    },
+    calendarFullWidth: {
+      width: '100%',
+      boxSizing: 'border-box' as const,
     },
     analyticsPane: {
       width: '30%',
@@ -1165,7 +1279,7 @@ const App: React.FC = () => {
         <div style={styles.header}>
           <div style={styles.headerTitle}>🚀 FlowGenius</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <span>Welcome, {email}</span>
+            <span>Welcome, {userProfile?.full_name || user?.email || 'User'}</span>
             <button 
               style={{...styles.headerButton, ...(gmailConnected ? styles.connectedButton : {})}}
               onClick={() => setShowGmailIntegration(true)}
@@ -1189,7 +1303,7 @@ const App: React.FC = () => {
             </button>
             <button 
               style={styles.logoutButton}
-              onClick={() => setIsLoggedIn(false)}
+              onClick={handleLogout}
             >
               Logout
             </button>
@@ -1199,7 +1313,7 @@ const App: React.FC = () => {
         <div style={styles.mainContent}>
           <div style={{
             ...styles.calendarContainer,
-            ...(showAnalytics ? styles.calendarWithAnalytics : {}),
+            ...(showAnalytics ? styles.calendarWithAnalytics : styles.calendarFullWidth),
           }}>
           {/* Controls */}
           <div style={styles.calendarControls}>
@@ -1562,40 +1676,47 @@ const App: React.FC = () => {
     );
   }
 
+  if (authLoading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.loginBox}>
+          <h1 style={styles.title}>🚀 FlowGenius</h1>
+          <p style={styles.subtitle}>Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={styles.container}>
       <div style={styles.loginBox}>
         <h1 style={styles.title}>🚀 FlowGenius</h1>
         <p style={styles.subtitle}>Your Productivity & Planning Companion</p>
         
-        <form style={styles.form} onSubmit={handleLogin}>
-          <input
-            style={styles.input}
-            type="email"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-          
-          <input
-            style={styles.input}
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-          
-          <button style={styles.button} type="submit">
-            Sign In
+        <div style={{ textAlign: 'center', padding: '20px' }}>
+          <p style={{ color: '#666', marginBottom: '20px' }}>
+            Please sign in to access your productivity dashboard
+          </p>
+          <button 
+            style={{...styles.button, fontSize: '18px', padding: '12px 24px'}}
+            onClick={() => setShowAuthModal(true)}
+          >
+            Get Started
           </button>
-        </form>
+        </div>
         
-        <p style={{ textAlign: 'center', marginTop: '20px', color: '#666', fontSize: '14px' }}>
-          Enter any email and password to continue
-        </p>
+        {authError && (
+          <p style={{ textAlign: 'center', marginTop: '16px', color: '#e53e3e', fontSize: '14px' }}>
+            {authError}
+          </p>
+        )}
       </div>
+
+      <AuthModal
+        isVisible={showAuthModal}
+        onSuccess={handleAuthSuccess}
+        onError={handleAuthError}
+      />
     </div>
   );
 };
