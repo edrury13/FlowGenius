@@ -9,7 +9,7 @@ module.exports = {
     description: 'Productivity & Planning Application',
     version: '1.0.0',
     copyright: 'Copyright © 2024 FlowGenius',
-    // icon: './src/assets/icon', // Will look for icon.ico on Windows
+    icon: './src/assets/icon', // Will look for icon.ico on Windows
     executableName: 'FlowGenius',
     appBundleId: 'com.flowgenius.app',
     appCategoryType: 'public.app-category.productivity',

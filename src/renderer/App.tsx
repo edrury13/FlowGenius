@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import { Fab, Modal, Box, Drawer } from '@mui/material';
+import { Psychology as SmartIcon } from '@mui/icons-material';
 import CssBaseline from '@mui/material/CssBaseline';
 import notificationService from './services/notifications';
 import gmailService from './services/gmail';
@@ -9,9 +11,18 @@ import trackingService from './services/tracking';
 import ProductivityDashboard from './components/Analytics/ProductivityDashboard';
 import AuthModal from './components/Auth/AuthModal';
 import EnhancedEventModal from './components/Events/EnhancedEventModal';
+import OnboardingTutorial from './components/Tutorial/OnboardingTutorial';
+import { ChatInterface } from './components/AIAssistant/ChatInterface';
 import { authService, type Profile } from './services/supabase';
 import { EventFormData } from './types';
 import type { User, Session } from '@supabase/supabase-js';
+import { useDispatch, useSelector } from 'react-redux';
+import { 
+  toggleVisibility, 
+  selectAIAssistantVisibility,
+  recordSuccessfulScheduling 
+} from './store/aiAssistantSlice';
+import type { RootState } from './store';
 import dayjs from 'dayjs';
 
 interface Event {
@@ -100,6 +111,10 @@ const convertFormDataToEvent = (formData: EventFormData, id?: string): Event => 
 };
 
 const App: React.FC = () => {
+  // Redux hooks
+  const dispatch = useDispatch();
+  const isAIAssistantVisible = useSelector(selectAIAssistantVisibility);
+  
   // Authentication state
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -144,6 +159,10 @@ const App: React.FC = () => {
   // System settings state
   const [showSystemSettings, setShowSystemSettings] = useState(false);
   const [systemInfo, setSystemInfo] = useState<any>(null);
+
+  // Tutorial state
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialCompleted, setTutorialCompleted] = useState(false);
 
   // Load events from localStorage on mount
   useEffect(() => {
@@ -367,6 +386,19 @@ const App: React.FC = () => {
     const trackingSettings = trackingService.getSettings();
     if (trackingSettings.enabled) {
       trackingService.startTracking();
+    }
+
+    // Check if user has completed the tutorial
+    const tutorialCompleted = localStorage.getItem('flowgenius-tutorial-completed');
+    const isFirstTimeUser = !tutorialCompleted;
+    
+    if (isFirstTimeUser) {
+      // Show tutorial for first-time users after a short delay
+      setTimeout(() => {
+        setShowTutorial(true);
+      }, 1000);
+    } else {
+      setTutorialCompleted(true);
     }
   };
 
@@ -729,6 +761,65 @@ const App: React.FC = () => {
       'This is a test notification from FlowGenius!',
       { type: 'system', requireInteraction: false }
     );
+  };
+
+  // Tutorial handlers
+  const handleTutorialComplete = () => {
+    setTutorialCompleted(true);
+    console.log('🎓 Tutorial completed successfully!');
+  };
+
+  const handleTutorialClose = () => {
+    setShowTutorial(false);
+  };
+
+  const restartTutorial = () => {
+    localStorage.removeItem('flowgenius-tutorial-completed');
+    localStorage.removeItem('flowgenius-tutorial-completed-date');
+    setTutorialCompleted(false);
+    setShowTutorial(true);
+  };
+
+  // AI Assistant handlers
+  const handleToggleAIAssistant = () => {
+    dispatch(toggleVisibility());
+  };
+
+  const handleAIEventCreate = (eventData: EventFormData) => {
+    // Convert EventFormData to Event and add to calendar
+    const newEvent = convertFormDataToEvent(eventData);
+    const updatedEvents = [...events, newEvent];
+    setEvents(updatedEvents);
+    setFilteredEvents(updatedEvents);
+    localStorage.setItem('flowgenius-events', JSON.stringify(updatedEvents));
+
+    // Record successful scheduling for AI learning
+    dispatch(recordSuccessfulScheduling({
+      eventType: newEvent.category,
+      suggestedLocation: eventData.location || '',
+      suggestedAttendees: eventData.attendees || [],
+      timeSlotUsed: 0 // Could be enhanced to track which time slot was actually used
+    }));
+  };
+
+  // Convert events to the format expected by AI Assistant
+  const getAICompatibleEvents = () => {
+    return events.map(event => ({
+      id: event.id,
+      user_id: user?.id || '',
+      title: event.title,
+      description: event.description || '',
+      start_time: `${event.date} ${event.startTime || '09:00'}`,
+      end_time: `${event.date} ${event.endTime || '10:00'}`,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      location: '',
+      attendees: event.attendees || [],
+      is_recurring: event.isRecurring || false,
+      recurrence_rule: event.recurrenceRule ? `FREQ=${event.recurrenceRule.frequency.toUpperCase()}` : '',
+      parent_event_id: event.parentEventId || undefined,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }));
   };
 
   const styles = {
@@ -1468,6 +1559,7 @@ const App: React.FC = () => {
                   style={{...styles.headerButton, ...(gmailConnected ? styles.connectedButton : {})}}
                   onClick={() => setShowGmailIntegration(true)}
                   title={gmailConnected ? 'Gmail Connected - Click to manage' : 'Connect Gmail'}
+                  data-tutorial="gmail-integration"
                 >
                   📧 Gmail {gmailConnected && '✓'}
                 </button>
@@ -1475,6 +1567,7 @@ const App: React.FC = () => {
                   style={styles.headerButton}
                   onClick={() => setShowNotificationSettings(true)}
                   title="Notification Settings"
+                  data-tutorial="notifications"
                 >
                   🔔
                 </button>
@@ -1482,6 +1575,7 @@ const App: React.FC = () => {
                   style={{...styles.headerButton, ...(showAnalytics ? styles.activeButton : {})}}
                   onClick={() => setShowAnalytics(!showAnalytics)}
                   title="Productivity Analytics"
+                  data-tutorial="analytics"
                 >
                   📊
                 </button>
@@ -1492,6 +1586,15 @@ const App: React.FC = () => {
                 >
                   ⚙️
                 </button>
+                {tutorialCompleted && (
+                  <button 
+                    style={styles.headerButton}
+                    onClick={restartTutorial}
+                    title="Restart Tutorial"
+                  >
+                    🎓
+                  </button>
+                )}
                 <button 
                   style={styles.logoutButton}
                   onClick={handleLogout}
@@ -1568,7 +1671,7 @@ const App: React.FC = () => {
                     →
                   </button>
                 </div>
-                <div style={styles.viewButtons}>
+                <div style={styles.viewButtons} data-tutorial="calendar-views">
                   {(['month', 'week', 'day', 'agenda'] as CalendarView[]).map(view => (
                     <button 
                       key={view}
@@ -1589,7 +1692,7 @@ const App: React.FC = () => {
                 {renderCalendarView()}
               </div>
               
-                <div style={{ marginTop: '20px', textAlign: 'center', color: '#666' }}>
+                <div style={{ marginTop: '20px', textAlign: 'center', color: '#666' }} data-tutorial="create-event">
                   Click on any day to create a new event • Click events to edit them
                 </div>
               </div>
@@ -1852,6 +1955,51 @@ const App: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Onboarding Tutorial */}
+            <OnboardingTutorial
+              open={showTutorial}
+              onClose={handleTutorialClose}
+              onComplete={handleTutorialComplete}
+            />
+
+            {/* AI Assistant Floating Action Button */}
+            <Fab
+              color="secondary"
+              aria-label="AI Assistant"
+              onClick={handleToggleAIAssistant}
+              sx={{
+                position: 'fixed',
+                bottom: 24,
+                right: 24,
+                zIndex: 1000,
+                backgroundColor: '#667eea',
+                '&:hover': {
+                  backgroundColor: '#5a67d8'
+                }
+              }}
+            >
+              <SmartIcon />
+            </Fab>
+
+            {/* AI Assistant Chat Interface */}
+            <Drawer
+              anchor="right"
+              open={isAIAssistantVisible}
+              onClose={() => dispatch(toggleVisibility())}
+              sx={{
+                '& .MuiDrawer-paper': {
+                  width: '500px',
+                  maxWidth: '90vw'
+                }
+              }}
+            >
+              <ChatInterface
+                events={getAICompatibleEvents()}
+                onEventCreate={handleAIEventCreate}
+                onClose={() => dispatch(toggleVisibility())}
+              />
+            </Drawer>
 
           </div>
         </LocalizationProvider>

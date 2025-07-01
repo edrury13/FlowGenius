@@ -1,5 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import { Provider } from 'react-redux';
+import { store } from './store';
 import App from './App';
 
 console.log('🚀 React entry point loaded');
@@ -16,7 +18,11 @@ if (!container) {
     const root = createRoot(container);
     
     console.log('🎭 Rendering React app...');
-    root.render(<App />);
+    root.render(
+      <Provider store={store}>
+        <App />
+      </Provider>
+    );
     
     console.log('✅ React app rendered successfully!');
   } catch (error) {

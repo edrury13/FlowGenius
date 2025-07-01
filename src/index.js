@@ -20,8 +20,8 @@ const createWindow = () => {
   // Load a simple HTML file for now
   mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
 
-  // Open the DevTools.
-  mainWindow.webContents.openDevTools();
+  // DevTools can be opened manually with F12 or Ctrl+Shift+I
+  // mainWindow.webContents.openDevTools();
 };
 
 // This method will be called when Electron has finished

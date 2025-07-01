@@ -169,10 +169,10 @@ const createWindow = (): void => {
     }
   });
 
-  // Open the DevTools in development
-  if (process.env.NODE_ENV === 'development') {
-    mainWindow.webContents.openDevTools();
-  }
+  // DevTools can be opened manually with F12 or Ctrl+Shift+I
+  // if (process.env.NODE_ENV === 'development') {
+  //   mainWindow.webContents.openDevTools();
+  // }
 };
 
 // Enhanced tray with upcoming events

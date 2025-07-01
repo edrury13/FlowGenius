@@ -3,6 +3,7 @@ import authSlice from './authSlice';
 import eventsSlice from './eventsSlice';
 import appSlice from './appSlice';
 import smartSchedulingSlice from './smartSchedulingSlice';
+import aiAssistantSlice from './aiAssistantSlice';
 
 export const store = configureStore({
   reducer: {
@@ -10,6 +11,7 @@ export const store = configureStore({
     events: eventsSlice,
     app: appSlice,
     smartScheduling: smartSchedulingSlice,
+    aiAssistant: aiAssistantSlice,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
