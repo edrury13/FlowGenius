@@ -9,7 +9,8 @@ import {
   CircularProgress,
   Alert,
   Divider,
-  Stack
+  Stack,
+  IconButton
 } from '@mui/material';
 import {
   Psychology,
@@ -17,7 +18,8 @@ import {
   TrendingUp,
   Business,
   SportsEsports,
-  Person
+  Person,
+  Close
 } from '@mui/icons-material';
 import { Event } from '../../services/supabase';
 import {
@@ -137,12 +139,17 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
   return (
     <Card sx={{ mt: 2, border: '2px solid #e3f2fd' }}>
       <CardContent>
-        <Box display="flex" alignItems="center" mb={2}>
-          <Psychology color="primary" sx={{ mr: 1 }} />
-          <Typography variant="h6" component="div">
-            Smart Scheduling Suggestions
-          </Typography>
-          {loading && <CircularProgress size={20} sx={{ ml: 'auto' }} />}
+        <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+          <Box display="flex" alignItems="center">
+            <Psychology color="primary" sx={{ mr: 1 }} />
+            <Typography variant="h6" component="div">
+              Smart Scheduling Suggestions
+            </Typography>
+            {loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
+          </Box>
+          <IconButton size="small" onClick={onClose} title="Hide Suggestions">
+            <Close fontSize="small" />
+          </IconButton>
         </Box>
 
         {error && (
@@ -260,7 +267,7 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
               </Stack>
             )}
 
-            <Box display="flex" justifyContent="space-between" mt={2}>
+            <Box display="flex" justifyContent="flex-start" mt={2}>
               <Button
                 size="small"
                 startIcon={<TrendingUp />}
@@ -268,9 +275,6 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                 disabled={loading}
               >
                 Refresh Suggestions
-              </Button>
-              <Button size="small" onClick={onClose}>
-                Hide Suggestions
               </Button>
             </Box>
           </>

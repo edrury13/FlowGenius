@@ -201,7 +201,7 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
       <DialogContent dividers>
         <Grid container spacing={3}>
           {/* Event Details Section */}
-          <Grid item xs={12} md={showSmartSuggestions ? 7 : 12}>
+          <Grid item xs={12}>
             <Box>
               <TextField
                 fullWidth
@@ -264,6 +264,33 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
                 </Grid>
               </Box>
 
+              {/* Smart Scheduling Suggestions - Right under Date & Time */}
+              {showSmartSuggestions && !event && (
+                <SmartSchedulingSuggestions
+                  title={formData.title}
+                  description={formData.description}
+                  preferredDate={selectedDate}
+                  existingEvents={existingEvents}
+                  onTimeSlotSelect={handleTimeSlotSelect}
+                  onClose={() => setShowSmartSuggestions(false)}
+                />
+              )}
+
+              {/* Show smart suggestions toggle for new events */}
+              {!event && !showSmartSuggestions && (
+                <Box mt={2} mb={2}>
+                  <Button
+                    startIcon={<Psychology />}
+                    onClick={() => setShowSmartSuggestions(true)}
+                    variant="outlined"
+                    color="primary"
+                    fullWidth
+                  >
+                    Show Smart Scheduling Suggestions
+                  </Button>
+                </Box>
+              )}
+
               {/* Location Section */}
               <TextField
                 fullWidth
@@ -322,34 +349,7 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
             </Box>
           </Grid>
 
-          {/* Smart Suggestions Section */}
-          {showSmartSuggestions && !event && (
-            <Grid item xs={12} md={5}>
-              <SmartSchedulingSuggestions
-                title={formData.title}
-                description={formData.description}
-                preferredDate={selectedDate}
-                existingEvents={existingEvents}
-                onTimeSlotSelect={handleTimeSlotSelect}
-                onClose={() => setShowSmartSuggestions(false)}
-              />
-            </Grid>
-          )}
         </Grid>
-
-        {/* Show smart suggestions toggle for new events */}
-        {!event && !showSmartSuggestions && (
-          <Box mt={2}>
-            <Button
-              startIcon={<Psychology />}
-              onClick={() => setShowSmartSuggestions(true)}
-              variant="outlined"
-              color="primary"
-            >
-              Show Smart Scheduling Suggestions
-            </Button>
-          </Box>
-        )}
       </DialogContent>
 
       <DialogActions>
