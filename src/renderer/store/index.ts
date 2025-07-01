@@ -2,12 +2,14 @@ import { configureStore } from '@reduxjs/toolkit';
 import authSlice from './authSlice';
 import eventsSlice from './eventsSlice';
 import appSlice from './appSlice';
+import smartSchedulingSlice from './smartSchedulingSlice';
 
 export const store = configureStore({
   reducer: {
     auth: authSlice,
     events: eventsSlice,
     app: appSlice,
+    smartScheduling: smartSchedulingSlice,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

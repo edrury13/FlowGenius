@@ -1,155 +1,312 @@
 // App usage tracking for Windows
 // This module tracks which applications the user is using and for how long
 
-let trackingInterval: NodeJS.Timeout | null = null;
-let currentApp: string | null = null;
-let currentAppStartTime: Date | null = null;
-let usageData: Array<{
-  appName: string;
-  windowTitle: string;
-  startTime: Date;
-  endTime?: Date;
-  duration?: number;
-}> = [];
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
-// Windows API declarations - we'll use a simpler approach for now
-declare const process: any;
+const execAsync = promisify(exec);
 
-interface AppUsageData {
-  appName: string;
+interface WindowInfo {
+  processName: string;
   windowTitle: string;
-  startTime: Date;
-  endTime?: Date;
-  duration?: number;
+  processId: number;
+  isActive: boolean;
 }
 
-const getActiveWindow = (): { appName: string; windowTitle: string } | null => {
-  try {
-    // For Windows, we'll use a simpler approach initially
-    // In a full implementation, you'd use node-ffi-napi to call Windows APIs
+interface AppUsageSession {
+  processName: string;
+  windowTitle: string;
+  startTime: Date;
+  endTime?: Date;
+  duration: number;
+  category: string;
+}
+
+class WindowsAppTracker {
+  private currentActiveApp: WindowInfo | null = null;
+  private currentSession: AppUsageSession | null = null;
+  private trackingInterval: NodeJS.Timeout | null = null;
+  private isTracking = false;
+
+  // App categorization - ONLY for apps that commonly exist
+  private appCategories: { [key: string]: string } = {
+    // Development
+    'code': 'development',
+    'devenv': 'development',
+    'cmd': 'development',
+    'powershell': 'development',
+    'notepad': 'productivity',
     
-    // For now, return a mock implementation
-    // TODO: Implement proper Windows API calls using GetForegroundWindow
+    // Web Browsers
+    'chrome': 'web',
+    'firefox': 'web',
+    'msedge': 'web',
+    'iexplore': 'web',
     
-    if (process.platform === 'win32') {
-      // Placeholder - in real implementation this would call:
-      // GetForegroundWindow() -> GetWindowText() -> GetWindowThreadProcessId() -> GetProcessImageFileName()
-      return {
-        appName: 'System',
-        windowTitle: 'Desktop'
-      };
+    // Office/Productivity
+    'winword': 'productivity',
+    'excel': 'productivity',
+    'powerpnt': 'productivity',
+    'outlook': 'productivity',
+    'onenote': 'productivity',
+    
+    // System
+    'explorer': 'system',
+    'taskmgr': 'system',
+    'regedit': 'system',
+    
+    // FlowGenius
+    'flowgenius': 'productivity',
+  };
+
+  constructor() {
+    console.log('🔍 Windows App Tracker initialized');
+  }
+
+  public async startTracking(): Promise<void> {
+    if (this.isTracking) return;
+    
+    this.isTracking = true;
+    console.log('📊 Starting real Windows app tracking...');
+    
+    // Get initial active window
+    await this.updateActiveWindow();
+    
+    // Check for active window changes every 5 seconds
+    this.trackingInterval = setInterval(async () => {
+      await this.updateActiveWindow();
+    }, 5000);
+  }
+
+  public stopTracking(): void {
+    if (!this.isTracking) return;
+    
+    this.isTracking = false;
+    
+    if (this.trackingInterval) {
+      clearInterval(this.trackingInterval);
+      this.trackingInterval = null;
     }
     
-    return null;
-  } catch (error) {
-    console.error('Error getting active window:', error);
-    return null;
-  }
-};
-
-const recordAppUsage = (appName: string, windowTitle: string, startTime: Date, endTime: Date): void => {
-  const duration = endTime.getTime() - startTime.getTime();
-  
-  usageData.push({
-    appName,
-    windowTitle,
-    startTime,
-    endTime,
-    duration
-  });
-
-  // Keep only last 1000 entries to prevent memory issues
-  if (usageData.length > 1000) {
-    usageData = usageData.slice(-1000);
-  }
-
-  // TODO: Store to Supabase database
-  // This would be done via IPC to the renderer process
-};
-
-const trackActiveWindow = (): void => {
-  const activeWindow = getActiveWindow();
-  
-  if (!activeWindow) return;
-
-  const { appName, windowTitle } = activeWindow;
-  const now = new Date();
-
-  // If this is a different app than before, record the previous app's usage
-  if (currentApp && currentApp !== appName && currentAppStartTime) {
-    recordAppUsage(currentApp, windowTitle, currentAppStartTime, now);
-  }
-
-  // Update current app tracking
-  if (currentApp !== appName) {
-    currentApp = appName;
-    currentAppStartTime = now;
-  }
-};
-
-export const startAppUsageTracking = (): void => {
-  if (trackingInterval) {
-    return; // Already tracking
-  }
-
-  console.log('Starting app usage tracking...');
-  
-  // Track every 5 seconds
-  trackingInterval = setInterval(trackActiveWindow, 5000);
-  
-  // Initialize current app
-  trackActiveWindow();
-};
-
-export const stopAppUsageTracking = (): void => {
-  if (trackingInterval) {
-    clearInterval(trackingInterval);
-    trackingInterval = null;
-    
-    // Record final usage if there's an active app
-    if (currentApp && currentAppStartTime) {
-      recordAppUsage(currentApp, '', currentAppStartTime, new Date());
+    // End current session
+    if (this.currentSession) {
+      this.endCurrentSession();
     }
     
-    console.log('Stopped app usage tracking');
+    console.log('📊 Stopped Windows app tracking');
   }
-};
 
-export const getUsageData = (): AppUsageData[] => {
-  return [...usageData];
-};
-
-export const clearUsageData = (): void => {
-  usageData = [];
-};
-
-// Get usage statistics
-export const getUsageStats = (days: number = 7): Record<string, number> => {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
-  
-  const stats: Record<string, number> = {};
-  
-  usageData
-    .filter(entry => entry.startTime >= cutoff && entry.duration)
-    .forEach(entry => {
-      if (!stats[entry.appName]) {
-        stats[entry.appName] = 0;
+  private async updateActiveWindow(): Promise<void> {
+    try {
+      const activeWindow = await this.getActiveWindow();
+      
+      if (!activeWindow) return;
+      
+      // Check if this is a different app/window
+      const isDifferent = !this.currentActiveApp ||
+        this.currentActiveApp.processName !== activeWindow.processName ||
+        this.currentActiveApp.windowTitle !== activeWindow.windowTitle;
+      
+      if (isDifferent) {
+        // End previous session
+        if (this.currentSession) {
+          this.endCurrentSession();
+        }
+        
+        // Start new session
+        this.startNewSession(activeWindow);
+        this.currentActiveApp = activeWindow;
+        
+        console.log(`🎯 Active: ${activeWindow.processName} - ${activeWindow.windowTitle}`);
+        console.log(`🔍 RAW Process Name: "${activeWindow.processName}"`);
+        console.log(`🔍 Formatted App Name: "${this.formatAppName(activeWindow.processName)}"`);
       }
-      stats[entry.appName] += entry.duration!;
-    });
-  
-  return stats;
-};
+    } catch (error) {
+      console.error('Error updating active window:', error);
+    }
+  }
 
-// Privacy-focused: Only track app names, not content
-export const getPrivacyInfo = (): string => {
-  return `
-FlowGenius App Usage Tracking:
-- Only application names and window titles are tracked
-- No content, keystrokes, or personal data is captured
-- Data is stored locally and optionally synced to your personal Supabase account
-- You can disable tracking at any time in settings
-- Data is used only for productivity insights and time management
-  `;
-}; 
+  private async getActiveWindow(): Promise<WindowInfo | null> {
+    try {
+      // PowerShell script to get active window info
+      const script = `
+        Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          using System.Text;
+          public class Win32 {
+            [DllImport("user32.dll")]
+            public static extern IntPtr GetForegroundWindow();
+            [DllImport("user32.dll")]
+            public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+            [DllImport("user32.dll")]
+            public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);
+          }
+"@
+        
+        $hwnd = [Win32]::GetForegroundWindow()
+        if ($hwnd -eq [IntPtr]::Zero) { exit }
+        
+        $sb = New-Object System.Text.StringBuilder 256
+        [Win32]::GetWindowText($hwnd, $sb, $sb.Capacity) | Out-Null
+        $windowTitle = $sb.ToString()
+        
+        $processId = 0
+        [Win32]::GetWindowThreadProcessId($hwnd, [ref]$processId) | Out-Null
+        
+        $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+        if ($process) {
+          $result = @{
+            ProcessName = $process.ProcessName.ToLower()
+            WindowTitle = $windowTitle
+            ProcessId = $processId
+          }
+          $result | ConvertTo-Json -Compress
+        }
+      `;
+      
+      const { stdout } = await execAsync(`powershell -Command "${script}"`);
+      
+      if (!stdout.trim()) return null;
+      
+      const data = JSON.parse(stdout.trim());
+      
+      return {
+        processName: data.ProcessName,
+        windowTitle: data.WindowTitle,
+        processId: data.ProcessId,
+        isActive: true
+      };
+    } catch (error) {
+      console.error('Error getting active window:', error);
+      return null;
+    }
+  }
+
+  private startNewSession(windowInfo: WindowInfo): void {
+    const category = this.categorizeApp(windowInfo.processName);
+    
+    this.currentSession = {
+      processName: windowInfo.processName,
+      windowTitle: windowInfo.windowTitle,
+      startTime: new Date(),
+      duration: 0,
+      category
+    };
+  }
+
+  private endCurrentSession(): void {
+    if (!this.currentSession) return;
+    
+    const endTime = new Date();
+    this.currentSession.endTime = endTime;
+    this.currentSession.duration = Math.floor(
+      (endTime.getTime() - this.currentSession.startTime.getTime()) / 1000
+    );
+    
+    // Only save sessions longer than 10 seconds
+    if (this.currentSession.duration >= 10) {
+      this.saveSession(this.currentSession);
+      console.log(`⏹️ Session ended: ${this.currentSession.processName} (${this.currentSession.duration}s)`);
+    }
+    
+    this.currentSession = null;
+  }
+
+  private categorizeApp(processName: string): string {
+    const lowerName = processName.toLowerCase();
+    
+    console.log(`🔍 categorizeApp input: "${lowerName}"`);
+    
+    // ONLY use exact matches to avoid false positives
+    const category = this.appCategories[lowerName] || 'other';
+    
+    console.log(`🔍 categorizeApp output: "${category}"`);
+    return category;
+  }
+
+  private saveSession(session: AppUsageSession): void {
+    // Send session data to renderer process
+    if (global.mainWindow && !global.mainWindow.isDestroyed()) {
+      const sessionData = {
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        appName: this.formatAppName(session.processName),
+        windowTitle: session.windowTitle,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        duration: session.duration,
+        date: session.startTime.toISOString().split('T')[0],
+        category: session.category
+      };
+      
+      console.log(`💾 Saving session - Raw: "${session.processName}" → App: "${sessionData.appName}"`);
+      global.mainWindow.webContents.send('app-usage-session', sessionData);
+    }
+  }
+
+  private formatAppName(processName: string): string {
+    console.log(`🔍 formatAppName input: "${processName}"`);
+    
+    // Convert ONLY well-known process names to readable app names
+    // Only map apps that actually exist and are commonly used
+    const nameMap: { [key: string]: string } = {
+      'chrome': 'Google Chrome',
+      'firefox': 'Mozilla Firefox',
+      'msedge': 'Microsoft Edge',
+      'code': 'Visual Studio Code',
+      'devenv': 'Visual Studio',
+      'explorer': 'Windows Explorer',
+      'winword': 'Microsoft Word',
+      'excel': 'Microsoft Excel',
+      'powerpnt': 'Microsoft PowerPoint',
+      'outlook': 'Microsoft Outlook',
+      'notepad': 'Notepad',
+      'cmd': 'Command Prompt',
+      'powershell': 'PowerShell',
+      'taskmgr': 'Task Manager',
+      'flowgenius': 'FlowGenius'
+    };
+    
+    const lowerName = processName.toLowerCase();
+    const result = nameMap[lowerName] || processName.charAt(0).toUpperCase() + processName.slice(1);
+    
+    console.log(`🔍 formatAppName output: "${result}"`);
+    return result;
+  }
+
+  public async getRunningApps(): Promise<WindowInfo[]> {
+    try {
+      const script = `
+        Get-Process | Where-Object { $_.MainWindowTitle -ne "" } | ForEach-Object {
+          @{
+            ProcessName = $_.ProcessName.ToLower()
+            WindowTitle = $_.MainWindowTitle
+            ProcessId = $_.Id
+          }
+        } | ConvertTo-Json
+      `;
+      
+      const { stdout } = await execAsync(`powershell -Command "${script}"`);
+      
+      if (!stdout.trim()) return [];
+      
+      const data = JSON.parse(stdout.trim());
+      return Array.isArray(data) ? data : [data];
+    } catch (error) {
+      console.error('Error getting running apps:', error);
+      return [];
+    }
+  }
+
+  public getCurrentApp(): WindowInfo | null {
+    return this.currentActiveApp;
+  }
+
+  public isCurrentlyTracking(): boolean {
+    return this.isTracking;
+  }
+}
+
+// Export singleton instance
+const windowsAppTracker = new WindowsAppTracker();
+export default windowsAppTracker; 

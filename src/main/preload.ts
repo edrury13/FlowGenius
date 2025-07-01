@@ -6,6 +6,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App usage tracking
   getAppUsageData: () => ipcRenderer.invoke('get-app-usage-data'),
   
+  toggleAppTracking: (enabled: boolean) => ipcRenderer.invoke('toggle-app-tracking', enabled),
+  
+  // Listen for app usage sessions from main process
+  onAppUsageSession: (callback: (data: any) => void) => 
+    ipcRenderer.on('app-usage-session', (_event, data) => callback(data)),
+  
   // Notifications
   showNotification: (options: { title: string; body: string }) => 
     ipcRenderer.invoke('show-notification', options),
@@ -41,7 +47,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
 declare global {
   interface Window {
     electronAPI: {
-      getAppUsageData: () => Promise<any[]>;
+      getAppUsageData: () => Promise<{
+        isTracking: boolean;
+        currentApp: any;
+        runningApps: any[];
+      }>;
+      toggleAppTracking: (enabled: boolean) => Promise<boolean>;
+      onAppUsageSession: (callback: (data: any) => void) => void;
       showNotification: (options: { title: string; body: string }) => Promise<void>;
       onQuickAddEvent: (callback: () => void) => void;
       onShowTodayEvents: (callback: () => void) => void;

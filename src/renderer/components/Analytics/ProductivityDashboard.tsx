@@ -37,6 +37,8 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
   const [settings, setSettings] = useState<TrackingSettings | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<7 | 14 | 30>(7);
   const [loading, setLoading] = useState(true);
+  const [realTrackingStatus, setRealTrackingStatus] = useState<any>(null);
+  const [isUsingRealTracking, setIsUsingRealTracking] = useState(false);
 
   useEffect(() => {
     if (isVisible) {
@@ -52,6 +54,16 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
       
       setMetrics(metricsData);
       setSettings(settingsData);
+      
+      // Check if using real tracking
+      const usingReal = trackingService.isUsingRealAppTracking();
+      setIsUsingRealTracking(usingReal);
+      
+      if (usingReal) {
+        const realStatus = await trackingService.getRealTrackingStatus();
+        setRealTrackingStatus(realStatus);
+        console.log('📊 Real tracking status:', realStatus);
+      }
     } catch (error) {
       console.error('Failed to load analytics data:', error);
     }
@@ -95,6 +107,26 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
     if (confirm('Are you sure you want to clear all tracking data? This cannot be undone.')) {
       trackingService.clearData();
       loadData();
+    }
+  };
+
+  const forceRestartRealTracking = async () => {
+    if (confirm('FORCE RESTART real tracking and clear ALL fake data? This will delete all existing data including Figma/Notion/Discord entries.')) {
+      console.log('🔥 FORCE RESTARTING real tracking...');
+      
+      try {
+        // Use the enhanced force restart method
+        await trackingService.forceRestartRealTracking();
+        
+        // Refresh the UI after restart
+        setTimeout(() => {
+          loadData();
+        }, 1000);
+        
+        console.log('✅ Real tracking FORCE RESTARTED successfully!');
+      } catch (error) {
+        console.error('❌ Failed to FORCE RESTART real tracking:', error);
+      }
     }
   };
 
@@ -399,6 +431,67 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
                         value={settings?.idleThresholdMinutes || 5}
                         onChange={(e) => handleSettingsUpdate({ idleThresholdMinutes: Number(e.target.value) })}
                       />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Real Tracking Status */}
+              <div style={styles.card}>
+                <h3 style={styles.cardTitle}>🔍 Real App Tracking Status</h3>
+                <div style={styles.settingsGrid}>
+                  <div>
+                    <div style={styles.metric}>
+                      <span>Tracking Mode:</span>
+                      <span style={styles.metricValue}>
+                        {isUsingRealTracking ? '✅ Real Windows Tracking' : '🔧 Mock/Simulated'}
+                      </span>
+                    </div>
+                    {realTrackingStatus && (
+                      <>
+                        <div style={styles.metric}>
+                          <span>Is Tracking:</span>
+                          <span style={styles.metricValue}>
+                            {realTrackingStatus.isTracking ? '✅ Active' : '❌ Stopped'}
+                          </span>
+                        </div>
+                        <div style={styles.metric}>
+                          <span>Current App:</span>
+                          <span style={styles.metricValue}>
+                            {realTrackingStatus.currentApp ? 
+                              `${realTrackingStatus.currentApp.processName}` : 
+                              'None detected'}
+                          </span>
+                        </div>
+                        <div style={styles.metric}>
+                          <span>Running Apps:</span>
+                          <span style={styles.metricValue}>
+                            {realTrackingStatus.runningApps?.length || 0} detected
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div>
+                    <button 
+                      style={{...styles.button, ...styles.primaryButton}}
+                      onClick={loadData}
+                    >
+                      🔄 Refresh Status
+                    </button>
+                    {isUsingRealTracking && (
+                      <button 
+                        style={{...styles.button, ...styles.dangerButton, marginTop: '8px'}}
+                        onClick={forceRestartRealTracking}
+                      >
+                        🔄 Restart Real Tracking
+                      </button>
+                    )}
+                    <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
+                      {isUsingRealTracking ? 
+                        'Real tracking uses Windows APIs to detect actual app usage' :
+                        'Mock tracking generates simulated data for testing'
+                      }
                     </div>
                   </div>
                 </div>

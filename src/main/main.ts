@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
-// import { startAppUsageTracking, stopAppUsageTracking } from './tracking';
+import windowsAppTracker from './tracking';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -14,6 +14,13 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuiting = false;
 let upcomingEvents: any[] = [];
+
+// Make mainWindow globally accessible for the tracker
+declare global {
+  var mainWindow: BrowserWindow | null;
+}
+
+global.mainWindow = mainWindow;
 
 // Auto-updater configuration
 const configureAutoUpdater = (): void => {
@@ -137,6 +144,8 @@ const createWindow = (): void => {
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
+    // Update global reference
+    global.mainWindow = mainWindow;
     // Check for updates after window is shown
     if (process.env.NODE_ENV !== 'development') {
       setTimeout(() => configureAutoUpdater(), 3000);
@@ -331,7 +340,7 @@ app.whenReady().then(() => {
   registerKeyboardShortcuts();
   
   // Start app usage tracking
-  // startAppUsageTracking();
+  windowsAppTracker.startTracking();
 
   app.on('activate', () => {
     // On OS X it's common to re-create a window in the app when the
@@ -345,7 +354,7 @@ app.whenReady().then(() => {
 // Quit when all windows are closed, except on macOS
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
-    // stopAppUsageTracking();
+    windowsAppTracker.stopTracking();
     app.quit();
   }
 });
@@ -373,8 +382,22 @@ if (!gotTheLock) {
 
 // IPC handlers for renderer communication
 ipcMain.handle('get-app-usage-data', async () => {
-  // This will be implemented in tracking.ts
-  return [];
+  // Return current tracking status and running apps
+  return {
+    isTracking: windowsAppTracker.isCurrentlyTracking(),
+    currentApp: windowsAppTracker.getCurrentApp(),
+    runningApps: await windowsAppTracker.getRunningApps()
+  };
+});
+
+// Handler to start/stop tracking
+ipcMain.handle('toggle-app-tracking', async (_event, enabled: boolean) => {
+  if (enabled) {
+    await windowsAppTracker.startTracking();
+  } else {
+    windowsAppTracker.stopTracking();
+  }
+  return windowsAppTracker.isCurrentlyTracking();
 });
 
 ipcMain.handle('show-notification', async (_event, options) => {

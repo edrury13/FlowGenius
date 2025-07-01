@@ -35,9 +35,10 @@ class AppTrackingService {
   private idleCheckInterval: NodeJS.Timeout | null = null;
   private lastActivityTime = Date.now();
   private isIdle = false;
+  private isUsingRealTracking = false;
   
   private settings: TrackingSettings = {
-    enabled: false,
+    enabled: true, // Enable by default for real tracking
     trackWindowTitles: true,
     trackIdleTime: true,
     idleThresholdMinutes: 5,
@@ -58,8 +59,75 @@ class AppTrackingService {
   ];
 
   constructor() {
+    console.log('🔧 Initializing AppTrackingService...');
     this.loadSettings();
     this.setupActivityDetection();
+    this.setupRealTracking();
+    
+    // FORCE start real tracking immediately if available
+    if (this.isUsingRealTracking) {
+      console.log('🚀 FORCE starting real app tracking in 1 second...');
+      setTimeout(() => {
+        this.startTracking().catch(error => {
+          console.error('❌ Failed to auto-start tracking:', error);
+        });
+      }, 1000); // Start quickly after initialization
+    } else {
+      console.error('💥 Real tracking NOT available - check Electron API');
+    }
+  }
+
+  private setupRealTracking(): void {
+    // Check if we have access to electron API
+    if (window.electronAPI) {
+      this.isUsingRealTracking = true;
+      console.log('📊 Using real Windows app tracking');
+      
+      // Clear any existing mock data on startup
+      this.clearMockDataIfExists();
+      
+      // Listen for app usage sessions from main process
+      window.electronAPI.onAppUsageSession((sessionData) => {
+        console.log('📊 Received REAL app usage session:', sessionData);
+        
+        // Store the session data
+        const existingData = this.loadStoredData();
+        existingData.push({
+          ...sessionData,
+          startTime: new Date(sessionData.startTime),
+          endTime: sessionData.endTime ? new Date(sessionData.endTime) : undefined
+        });
+        this.saveUsageData(existingData);
+      });
+    } else {
+      console.log('📊 Using mock app tracking (no Electron API available)');
+    }
+  }
+
+  private clearMockDataIfExists(): void {
+    const existingData = this.loadStoredData();
+    
+    // Find entries that look like mock data (contains fake app names)
+    const fakeAppNames = ['Figma', 'Notion', 'Discord', 'Slack', 'Spotify'];
+    const mockData = existingData.filter(item => 
+      item.id && item.id.startsWith('mock-') || 
+      fakeAppNames.some(fake => item.appName.includes(fake))
+    );
+    
+    if (mockData.length > 0) {
+      console.log(`🗑️ FORCE CLEARING ${mockData.length} mock data entries (including fake apps)`);
+      console.log('🗑️ Removing:', mockData.map(d => d.appName));
+      
+      const realData = existingData.filter(item => 
+        !(item.id && item.id.startsWith('mock-')) &&
+        !fakeAppNames.some(fake => item.appName.includes(fake))
+      );
+      
+      this.saveUsageData(realData);
+      console.log(`✅ Kept ${realData.length} real data entries`);
+    } else {
+      console.log('✅ No mock data found to clear');
+    }
   }
 
   private loadSettings(): void {
@@ -134,38 +202,66 @@ class AppTrackingService {
     console.log('📊 Tracking settings updated:', this.settings);
   }
 
-  public startTracking(): void {
+  public async startTracking(): Promise<void> {
+    console.log('🚀 startTracking() called');
+    console.log('📊 Settings enabled:', this.settings.enabled);
+    console.log('📊 Is using real tracking:', this.isUsingRealTracking);
+    console.log('📊 Has electronAPI:', !!window.electronAPI);
+
     if (!this.settings.enabled) {
       console.log('⚠️ Tracking disabled in settings');
       return;
     }
 
     if (this.isTracking) {
-      console.log('⚠️ Already tracking');
-      return;
+      console.log('⚠️ Already tracking - stopping first');
+      await this.stopTracking();
     }
 
     this.isTracking = true;
-    console.log('📊 Started app usage tracking');
+    console.log('✅ Started app usage tracking');
 
-    // Start tracking current app
-    this.trackCurrentApp();
+    if (this.isUsingRealTracking && window.electronAPI) {
+      // Use ONLY real Windows app tracking - NO MOCK DATA
+      console.log('🔥 FORCING REAL Windows app tracking...');
+      try {
+        const trackingEnabled = await window.electronAPI.toggleAppTracking(true);
+        console.log('✅ Real tracking enabled result:', trackingEnabled);
+        
+        // CRITICAL: Do NOT start any mock tracking intervals when using real tracking
+        console.log('🚫 Mock tracking disabled - using ONLY real Windows API data');
+        
+      } catch (error) {
+        console.error('❌ FAILED to enable real tracking:', error);
+        this.isTracking = false;
+        return;
+      }
+    } else {
+      // This should NOT happen in Electron - but if it does, log it clearly
+      console.error('💥 ELECTRON API NOT AVAILABLE - Cannot use real tracking!');
+      console.error('📊 electronAPI available:', !!window.electronAPI);
+      console.error('📊 isUsingRealTracking:', this.isUsingRealTracking);
+      
+      this.isTracking = false;
+      return;
+    }
 
-    // Track every 30 seconds
-    this.trackingInterval = setInterval(() => {
-      this.trackCurrentApp();
-    }, 30000);
-
-    // Check for idle every minute
+    // Check for idle every minute (this doesn't interfere with real tracking)
     this.idleCheckInterval = setInterval(() => {
       this.checkIdleStatus();
     }, 60000);
   }
 
-  public stopTracking(): void {
+  public async stopTracking(): Promise<void> {
     if (!this.isTracking) return;
 
     this.isTracking = false;
+    
+    if (this.isUsingRealTracking && window.electronAPI) {
+      // Stop real Windows app tracking
+      const trackingEnabled = await window.electronAPI.toggleAppTracking(false);
+      console.log('📊 Real tracking stopped:', !trackingEnabled);
+    }
     
     if (this.trackingInterval) {
       clearInterval(this.trackingInterval);
@@ -426,6 +522,47 @@ class AppTrackingService {
 
   public getCurrentApp(): string | null {
     return this.currentSession?.appName || null;
+  }
+
+  public async getRealTrackingStatus(): Promise<any> {
+    if (this.isUsingRealTracking && window.electronAPI) {
+      try {
+        return await window.electronAPI.getAppUsageData();
+      } catch (error) {
+        console.error('Failed to get tracking status:', error);
+        return null;
+      }
+    }
+    return null;
+  }
+
+  public isUsingRealAppTracking(): boolean {
+    return this.isUsingRealTracking;
+  }
+
+  public async forceRestartRealTracking(): Promise<void> {
+    console.log('🔄 FORCE RESTARTING real tracking...');
+    
+    // Stop any existing tracking
+    await this.stopTracking();
+    
+    // Force clear ALL data (including legitimate-looking fake data)
+    console.log('🗑️ FORCE CLEARING ALL DATA...');
+    this.clearData();
+    
+    // Force clear mock data again (in case some slipped through)
+    this.clearMockDataIfExists();
+    
+    // Re-setup real tracking
+    this.setupRealTracking();
+    
+    // Force start real tracking
+    if (this.isUsingRealTracking) {
+      console.log('🚀 FORCE RESTARTING real tracking NOW...');
+      await this.startTracking();
+    } else {
+      console.error('💥 Still cannot access real tracking after restart');
+    }
   }
 
   public cleanup(): void {

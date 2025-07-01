@@ -1,11 +1,18 @@
 import React, { useState, useEffect } from 'react';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import CssBaseline from '@mui/material/CssBaseline';
 import notificationService from './services/notifications';
 import gmailService from './services/gmail';
 import trackingService from './services/tracking';
 import ProductivityDashboard from './components/Analytics/ProductivityDashboard';
 import AuthModal from './components/Auth/AuthModal';
+import EnhancedEventModal from './components/Events/EnhancedEventModal';
 import { authService, type Profile } from './services/supabase';
+import { EventFormData } from './types';
 import type { User, Session } from '@supabase/supabase-js';
+import dayjs from 'dayjs';
 
 interface Event {
   id: string;
@@ -33,6 +40,63 @@ const CATEGORY_COLORS = {
   meeting: '#ed8936',
   task: '#9f7aea',
   reminder: '#38b2ac'
+};
+
+// Material-UI theme configuration
+const theme = createTheme({
+  palette: {
+    mode: 'light',
+    primary: {
+      main: '#667eea',
+    },
+    secondary: {
+      main: '#48bb78',
+    },
+  },
+});
+
+// Conversion functions between Event and EventFormData
+const convertEventToFormData = (event: Event, selectedDate: string): EventFormData => {
+  const eventDate = event.date || selectedDate;
+  const startTime = event.startTime ? 
+    dayjs(`${eventDate} ${event.startTime}`).toDate() : 
+    dayjs(`${eventDate} 09:00`).toDate();
+  const endTime = event.endTime ? 
+    dayjs(`${eventDate} ${event.endTime}`).toDate() : 
+    dayjs(startTime).add(1, 'hour').toDate();
+
+  return {
+    title: event.title,
+    description: event.description || '',
+    startTime,
+    endTime,
+    location: '', // Not in current Event interface
+    attendees: event.attendees || [],
+    isRecurring: event.isRecurring || false,
+    recurrenceRule: event.recurrenceRule ? `FREQ=${event.recurrenceRule.frequency.toUpperCase()}` : ''
+  };
+};
+
+const convertFormDataToEvent = (formData: EventFormData, id?: string): Event => {
+  const eventDate = dayjs(formData.startTime).format('YYYY-MM-DD');
+  const startTime = dayjs(formData.startTime).format('HH:mm');
+  const endTime = dayjs(formData.endTime).format('HH:mm');
+
+  return {
+    id: id || Date.now().toString(),
+    title: formData.title,
+    description: formData.description,
+    date: eventDate,
+    startTime,
+    endTime,
+    attendees: formData.attendees,
+    category: 'personal', // Default category, could be enhanced with smart classification
+    isRecurring: formData.isRecurring,
+    recurrenceRule: formData.recurrenceRule ? {
+      frequency: formData.recurrenceRule.includes('DAILY') ? 'daily' :
+                formData.recurrenceRule.includes('WEEKLY') ? 'weekly' : 'monthly'
+    } : undefined
+  };
 };
 
 const App: React.FC = () => {
@@ -418,6 +482,48 @@ const App: React.FC = () => {
 
     console.log(`✅ Generated ${events.length} total events (including original)`);
     return events;
+  };
+
+  // New handler for the Enhanced Event Modal
+  const handleEventSave = (eventData: EventFormData) => {
+    let newEvent: Event;
+    
+    if (editingEvent) {
+      // Update existing event
+      newEvent = convertFormDataToEvent(eventData, editingEvent.id);
+      
+      // Cancel existing reminders
+      notificationService.cancelEventReminders(editingEvent.id);
+      
+      // Remove existing event instances
+      const eventsWithoutThis = events.filter(event => 
+        event.id !== editingEvent.id && event.parentEventId !== editingEvent.id
+      );
+      
+      // Generate new event(s) based on updated settings
+      const updatedEvents = generateRecurringEvents(newEvent);
+      
+      // Schedule notifications for updated events
+      updatedEvents.forEach(event => {
+        notificationService.scheduleEventReminder(event);
+      });
+      
+      setEvents([...eventsWithoutThis, ...updatedEvents]);
+    } else {
+      // Create new event
+      newEvent = convertFormDataToEvent(eventData);
+      const newEvents = generateRecurringEvents(newEvent);
+      
+      // Schedule notifications for new events
+      newEvents.forEach(event => {
+        notificationService.scheduleEventReminder(event);
+      });
+      
+      setEvents([...events, ...newEvents]);
+    }
+    
+    setShowEventModal(false);
+    setEditingEvent(null);
   };
 
   const handleCreateOrUpdateEvent = (e: React.FormEvent) => {
@@ -1350,522 +1456,461 @@ const App: React.FC = () => {
 
   if (isLoggedIn) {
     return (
-      <div style={styles.dashboard}>
-        <div style={styles.header}>
-          <div style={styles.headerTitle}>🚀 FlowGenius</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
-            <span>Welcome, {userProfile?.full_name || user?.email || 'User'}</span>
-            <button 
-              style={{...styles.headerButton, ...(gmailConnected ? styles.connectedButton : {})}}
-              onClick={() => setShowGmailIntegration(true)}
-              title={gmailConnected ? 'Gmail Connected - Click to manage' : 'Connect Gmail'}
-            >
-              📧 Gmail {gmailConnected && '✓'}
-            </button>
-            <button 
-              style={styles.headerButton}
-              onClick={() => setShowNotificationSettings(true)}
-              title="Notification Settings"
-            >
-              🔔
-            </button>
-            <button 
-              style={{...styles.headerButton, ...(showAnalytics ? styles.activeButton : {})}}
-              onClick={() => setShowAnalytics(!showAnalytics)}
-              title="Productivity Analytics"
-            >
-              📊
-            </button>
-            <button 
-              style={styles.headerButton}
-              onClick={() => setShowSystemSettings(true)}
-              title="System Settings & Shortcuts"
-            >
-              ⚙️
-            </button>
-            <button 
-              style={styles.logoutButton}
-              onClick={handleLogout}
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-        
-        <div style={styles.mainContent}>
-          <div style={{
-            ...styles.calendarContainer,
-            ...(showAnalytics ? styles.calendarWithAnalytics : styles.calendarFullWidth),
-          }}>
-          {/* Controls */}
-          <div style={styles.calendarControls}>
-            <div style={styles.searchAndFilter}>
-              <input
-                style={styles.searchInput}
-                type="text"
-                placeholder="Search events..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-              <select
-                style={styles.select}
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-              >
-                <option value="all">All Categories</option>
-                <option value="work">Work</option>
-                <option value="personal">Personal</option>
-                <option value="meeting">Meeting</option>
-                <option value="task">Task</option>
-                <option value="reminder">Reminder</option>
-              </select>
+      <ThemeProvider theme={theme}>
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
+          <CssBaseline />
+          <div style={styles.dashboard}>
+            <div style={styles.header}>
+              <div style={styles.headerTitle}>🚀 FlowGenius</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <span>Welcome, {userProfile?.full_name || user?.email || 'User'}</span>
+                <button 
+                  style={{...styles.headerButton, ...(gmailConnected ? styles.connectedButton : {})}}
+                  onClick={() => setShowGmailIntegration(true)}
+                  title={gmailConnected ? 'Gmail Connected - Click to manage' : 'Connect Gmail'}
+                >
+                  📧 Gmail {gmailConnected && '✓'}
+                </button>
+                <button 
+                  style={styles.headerButton}
+                  onClick={() => setShowNotificationSettings(true)}
+                  title="Notification Settings"
+                >
+                  🔔
+                </button>
+                <button 
+                  style={{...styles.headerButton, ...(showAnalytics ? styles.activeButton : {})}}
+                  onClick={() => setShowAnalytics(!showAnalytics)}
+                  title="Productivity Analytics"
+                >
+                  📊
+                </button>
+                <button 
+                  style={styles.headerButton}
+                  onClick={() => setShowSystemSettings(true)}
+                  title="System Settings & Shortcuts"
+                >
+                  ⚙️
+                </button>
+                <button 
+                  style={styles.logoutButton}
+                  onClick={handleLogout}
+                >
+                  Logout
+                </button>
+              </div>
             </div>
             
-            {selectedEvents.length > 0 && (
-              <div style={styles.bulkActions}>
-                <span>{selectedEvents.length} selected</span>
-                <button 
-                  style={{...styles.modalButton, ...styles.dangerButton}}
-                  onClick={handleBulkDelete}
-                >
-                  Delete Selected
-                </button>
-                <button 
-                  style={{...styles.modalButton, ...styles.secondaryButton}}
-                  onClick={() => setSelectedEvents([])}
-                >
-                  Clear Selection
-                </button>
+            <div style={styles.mainContent}>
+              <div style={{
+                ...styles.calendarContainer,
+                ...(showAnalytics ? styles.calendarWithAnalytics : styles.calendarFullWidth),
+              }}>
+              {/* Controls */}
+              <div style={styles.calendarControls}>
+                <div style={styles.searchAndFilter}>
+                  <input
+                    style={styles.searchInput}
+                    type="text"
+                    placeholder="Search events..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                  <select
+                    style={styles.select}
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                  >
+                    <option value="all">All Categories</option>
+                    <option value="work">Work</option>
+                    <option value="personal">Personal</option>
+                    <option value="meeting">Meeting</option>
+                    <option value="task">Task</option>
+                    <option value="reminder">Reminder</option>
+                  </select>
+                </div>
+                
+                {selectedEvents.length > 0 && (
+                  <div style={styles.bulkActions}>
+                    <span>{selectedEvents.length} selected</span>
+                    <button 
+                      style={{...styles.modalButton, ...styles.dangerButton}}
+                      onClick={handleBulkDelete}
+                    >
+                      Delete Selected
+                    </button>
+                    <button 
+                      style={{...styles.modalButton, ...styles.secondaryButton}}
+                      onClick={() => setSelectedEvents([])}
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Calendar Header */}
+              <div style={styles.calendarHeader}>
+                <div style={styles.calendarTitle}>
+                  <button 
+                    style={styles.navButton}
+                    onClick={() => navigateDate('prev')}
+                    title="Previous"
+                  >
+                    ←
+                  </button>
+                  {getViewTitle()}
+                  <button 
+                    style={styles.navButton}
+                    onClick={() => navigateDate('next')}
+                    title="Next"
+                  >
+                    →
+                  </button>
+                </div>
+                <div style={styles.viewButtons}>
+                  {(['month', 'week', 'day', 'agenda'] as CalendarView[]).map(view => (
+                    <button 
+                      key={view}
+                      style={{
+                        ...styles.viewButton, 
+                        ...(currentView === view ? styles.activeViewButton : {})
+                      }}
+                      onClick={() => setCurrentView(view)}
+                    >
+                      {view.charAt(0).toUpperCase() + view.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              
+              {/* Calendar */}
+              <div style={styles.calendar}>
+                {renderCalendarView()}
+              </div>
+              
+                <div style={{ marginTop: '20px', textAlign: 'center', color: '#666' }}>
+                  Click on any day to create a new event • Click events to edit them
+                </div>
+              </div>
+              
+              {/* Analytics Pane */}
+              {showAnalytics && (
+                <div style={styles.analyticsPane}>
+                  <ProductivityDashboard 
+                    isVisible={true}
+                    onClose={() => setShowAnalytics(false)}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Enhanced Event Modal with Smart Scheduling */}
+            <EnhancedEventModal
+              open={showEventModal}
+              onClose={() => setShowEventModal(false)}
+              onSave={handleEventSave}
+              onDelete={handleDeleteEvent}
+              event={editingEvent ? {
+                id: editingEvent.id,
+                user_id: user?.id || '',
+                title: editingEvent.title,
+                description: editingEvent.description || '',
+                start_time: editingEvent.date && editingEvent.startTime ? 
+                  `${editingEvent.date}T${editingEvent.startTime}:00` : new Date().toISOString(),
+                end_time: editingEvent.date && editingEvent.endTime ? 
+                  `${editingEvent.date}T${editingEvent.endTime}:00` : new Date().toISOString(),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                location: '',
+                attendees: editingEvent.attendees || [],
+                is_recurring: editingEvent.isRecurring || false,
+                recurrence_rule: editingEvent.recurrenceRule ? 
+                  `FREQ=${editingEvent.recurrenceRule.frequency.toUpperCase()}` : '',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              } : undefined}
+              existingEvents={events.map(event => ({
+                id: event.id,
+                user_id: user?.id || '',
+                title: event.title,
+                description: event.description || '',
+                start_time: event.date && event.startTime ? 
+                  `${event.date}T${event.startTime}:00` : new Date().toISOString(),
+                end_time: event.date && event.endTime ? 
+                  `${event.date}T${event.endTime}:00` : new Date().toISOString(),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                location: '',
+                attendees: event.attendees || [],
+                is_recurring: event.isRecurring || false,
+                recurrence_rule: event.recurrenceRule ? 
+                  `FREQ=${event.recurrenceRule.frequency.toUpperCase()}` : '',
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }))}
+              selectedDate={selectedDate ? new Date(selectedDate) : new Date()}
+            />
+
+            {/* Notification Settings Modal */}
+            {showNotificationSettings && (
+              <div style={styles.modalOverlay} onClick={() => setShowNotificationSettings(false)}>
+                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                  <div style={styles.modalHeader}>
+                    <span>🔔 Notification Settings</span>
+                  </div>
+                  
+                  <div style={styles.modalForm}>
+                    <div style={styles.settingsSection}>
+                      <h4>Event Reminders</h4>
+                      <label style={styles.modalCheckbox}>
+                        <input
+                          type="checkbox"
+                          checked={notificationService.getSettings().eventReminders}
+                          onChange={(e) => handleNotificationSettingsUpdate({ eventReminders: e.target.checked })}
+                        />
+                        Enable event reminders
+                      </label>
+                      
+                      <label style={styles.modalCheckbox}>
+                        <input
+                          type="checkbox"
+                          checked={notificationService.getSettings().soundEnabled}
+                          onChange={(e) => handleNotificationSettingsUpdate({ soundEnabled: e.target.checked })}
+                        />
+                        Enable notification sounds
+                      </label>
+                      
+                      <label style={styles.modalCheckbox}>
+                        <input
+                          type="checkbox"
+                          checked={notificationService.getSettings().productivityInsights}
+                          onChange={(e) => handleNotificationSettingsUpdate({ productivityInsights: e.target.checked })}
+                        />
+                        Enable productivity insights
+                      </label>
+                    </div>
+
+                    <div style={styles.settingsSection}>
+                      <h4>Test Notifications</h4>
+                      <button 
+                        type="button"
+                        style={{...styles.modalButton, ...styles.primaryButton}}
+                        onClick={testNotification}
+                      >
+                        Send Test Notification
+                      </button>
+                    </div>
+                    
+                    <div style={styles.modalButtons}>
+                      <button 
+                        type="button"
+                        style={{...styles.modalButton, ...styles.secondaryButton}}
+                        onClick={() => setShowNotificationSettings(false)}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
-          </div>
 
-          {/* Calendar Header */}
-          <div style={styles.calendarHeader}>
-            <div style={styles.calendarTitle}>
-              <button 
-                style={styles.navButton}
-                onClick={() => navigateDate('prev')}
-                title="Previous"
-              >
-                ←
-              </button>
-              {getViewTitle()}
-              <button 
-                style={styles.navButton}
-                onClick={() => navigateDate('next')}
-                title="Next"
-              >
-                →
-              </button>
-            </div>
-            <div style={styles.viewButtons}>
-              {(['month', 'week', 'day', 'agenda'] as CalendarView[]).map(view => (
-                <button 
-                  key={view}
-                  style={{
-                    ...styles.viewButton, 
-                    ...(currentView === view ? styles.activeViewButton : {})
-                  }}
-                  onClick={() => setCurrentView(view)}
-                >
-                  {view.charAt(0).toUpperCase() + view.slice(1)}
-                </button>
-              ))}
-            </div>
-          </div>
-          
-          {/* Calendar */}
-          <div style={styles.calendar}>
-            {renderCalendarView()}
-          </div>
-          
-            <div style={{ marginTop: '20px', textAlign: 'center', color: '#666' }}>
-              Click on any day to create a new event • Click events to edit them
-            </div>
-          </div>
-          
-          {/* Analytics Pane */}
-          {showAnalytics && (
-            <div style={styles.analyticsPane}>
-              <ProductivityDashboard 
-                isVisible={true}
-                onClose={() => setShowAnalytics(false)}
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Event Creation/Edit Modal */}
-        {showEventModal && (
-          <div style={styles.modalOverlay} onClick={() => setShowEventModal(false)}>
-            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-              <div style={styles.modalHeader}>
-                <span>
-                  {editingEvent ? 'Edit Event' : 'Create New Event'} - {new Date(selectedDate).toLocaleDateString()}
-                </span>
-                {editingEvent && (
-                  <button 
-                    style={{...styles.modalButton, ...styles.dangerButton}}
-                    onClick={() => handleDeleteEvent(editingEvent.id)}
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
-              
-              <form style={styles.modalForm} onSubmit={handleCreateOrUpdateEvent}>
-                <input
-                  style={styles.modalInput}
-                  type="text"
-                  placeholder="Event Title *"
-                  value={eventTitle}
-                  onChange={(e) => setEventTitle(e.target.value)}
-                  required
-                  autoFocus
-                />
-                
-                <div style={styles.modalRow}>
-                  <input
-                    style={styles.modalInput}
-                    type="time"
-                    placeholder="Start Time"
-                    value={eventStartTime}
-                    onChange={(e) => setEventStartTime(e.target.value)}
-                  />
-                  <input
-                    style={styles.modalInput}
-                    type="time"
-                    placeholder="End Time"
-                    value={eventEndTime}
-                    onChange={(e) => setEventEndTime(e.target.value)}
-                  />
-                </div>
-                
-                <select
-                  style={styles.modalSelect}
-                  value={eventCategory}
-                  onChange={(e) => setEventCategory(e.target.value as Event['category'])}
-                >
-                  <option value="personal">Personal</option>
-                  <option value="work">Work</option>
-                  <option value="meeting">Meeting</option>
-                  <option value="task">Task</option>
-                  <option value="reminder">Reminder</option>
-                </select>
-                
-                <input
-                  style={styles.modalInput}
-                  type="text"
-                  placeholder="Attendees (comma-separated emails)"
-                  value={eventAttendees}
-                  onChange={(e) => setEventAttendees(e.target.value)}
-                />
-                
-                <textarea
-                  style={styles.modalTextarea}
-                  placeholder="Description (optional)"
-                  value={eventDescription}
-                  onChange={(e) => setEventDescription(e.target.value)}
-                />
-                
-                <label style={styles.modalCheckbox}>
-                  <input
-                    type="checkbox"
-                    checked={isRecurring}
-                    onChange={(e) => setIsRecurring(e.target.checked)}
-                  />
-                  Recurring Event
-                </label>
-                
-                {isRecurring && (
-                                       <div style={styles.recurrenceSection}>
-                     <h4>Repeat</h4>
-                     <select
-                       style={styles.modalSelect}
-                       value={recurrenceFrequency}
-                       onChange={(e) => setRecurrenceFrequency(e.target.value as any)}
-                     >
-                       <option value="daily">Every Day</option>
-                       <option value="weekly">Every Week</option>
-                       <option value="monthly">Every Month</option>
-                     </select>
-                     <p style={{ fontSize: '12px', color: '#666', margin: '10px 0 0 0' }}>
-                       This will create repeating events for the next 30 occurrences
-                     </p>
-                   </div>
-                )}
-                
-                <div style={styles.modalButtons}>
-                  <button 
-                    type="button"
-                    style={{...styles.modalButton, ...styles.secondaryButton}}
-                    onClick={() => setShowEventModal(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    type="submit"
-                    style={{...styles.modalButton, ...styles.primaryButton}}
-                  >
-                    {editingEvent ? 'Update Event' : 'Create Event'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* Notification Settings Modal */}
-        {showNotificationSettings && (
-          <div style={styles.modalOverlay} onClick={() => setShowNotificationSettings(false)}>
-            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-              <div style={styles.modalHeader}>
-                <span>🔔 Notification Settings</span>
-              </div>
-              
-              <div style={styles.modalForm}>
-                <div style={styles.settingsSection}>
-                  <h4>Event Reminders</h4>
-                  <label style={styles.modalCheckbox}>
-                    <input
-                      type="checkbox"
-                      checked={notificationService.getSettings().eventReminders}
-                      onChange={(e) => handleNotificationSettingsUpdate({ eventReminders: e.target.checked })}
-                    />
-                    Enable event reminders
-                  </label>
+            {/* Gmail Integration Modal */}
+            {showGmailIntegration && (
+              <div style={styles.modalOverlay} onClick={() => setShowGmailIntegration(false)}>
+                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                  <div style={styles.modalHeader}>
+                    <span>📧 Gmail Integration</span>
+                  </div>
                   
-                  <label style={styles.modalCheckbox}>
-                    <input
-                      type="checkbox"
-                      checked={notificationService.getSettings().soundEnabled}
-                      onChange={(e) => handleNotificationSettingsUpdate({ soundEnabled: e.target.checked })}
-                    />
-                    Enable notification sounds
-                  </label>
-                  
-                  <label style={styles.modalCheckbox}>
-                    <input
-                      type="checkbox"
-                      checked={notificationService.getSettings().productivityInsights}
-                      onChange={(e) => handleNotificationSettingsUpdate({ productivityInsights: e.target.checked })}
-                    />
-                    Enable productivity insights
-                  </label>
-                </div>
-
-                <div style={styles.settingsSection}>
-                  <h4>Test Notifications</h4>
-                  <button 
-                    type="button"
-                    style={{...styles.modalButton, ...styles.primaryButton}}
-                    onClick={testNotification}
-                  >
-                    Send Test Notification
-                  </button>
-                </div>
-                
-                <div style={styles.modalButtons}>
-                  <button 
-                    type="button"
-                    style={{...styles.modalButton, ...styles.secondaryButton}}
-                    onClick={() => setShowNotificationSettings(false)}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Gmail Integration Modal */}
-        {showGmailIntegration && (
-          <div style={styles.modalOverlay} onClick={() => setShowGmailIntegration(false)}>
-            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-              <div style={styles.modalHeader}>
-                <span>📧 Gmail Integration</span>
-              </div>
-              
-              <div style={styles.modalForm}>
-                <div style={styles.settingsSection}>
-                  <h4>Connection Status</h4>
-                  <p style={{ color: gmailConnected ? '#4caf50' : '#f44336', fontWeight: 'bold' }}>
-                    {gmailConnected ? '✅ Connected to Gmail' : '❌ Not Connected'}
-                  </p>
-                  
-                  {!gmailConnected ? (
-                    <div>
-                      <p>Connect Gmail to automatically import calendar events from your emails.</p>
-                      <button 
-                        style={{...styles.modalButton, ...styles.primaryButton}}
-                        onClick={handleGmailConnect}
-                      >
-                        Connect Gmail
-                      </button>
-                    </div>
-                  ) : (
-                    <div>
-                      <button 
-                        style={{...styles.modalButton, ...styles.primaryButton}}
-                        onClick={handleImportFromGmail}
-                        disabled={loadingEmails}
-                      >
-                        {loadingEmails ? 'Importing...' : 'Import Recent Events'}
-                      </button>
-                      <button 
-                        style={{...styles.modalButton, ...styles.dangerButton}}
-                        onClick={handleGmailDisconnect}
-                      >
-                        Disconnect Gmail
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {gmailEmails.length > 0 && (
-                  <div style={styles.settingsSection}>
-                    <h4>Recent Emails ({gmailEmails.length})</h4>
-                    <div style={{ maxHeight: '200px', overflow: 'auto' }}>
-                      {gmailEmails.map((email, index) => (
-                        <div key={email.id || index} style={styles.emailItem}>
-                          <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{email.subject}</div>
-                          <div style={{ fontSize: '12px', color: '#666' }}>From: {email.from}</div>
-                          <div style={{ fontSize: '12px', color: '#999' }}>{email.snippet}</div>
+                  <div style={styles.modalForm}>
+                    <div style={styles.settingsSection}>
+                      <h4>Connection Status</h4>
+                      <p style={{ color: gmailConnected ? '#4caf50' : '#f44336', fontWeight: 'bold' }}>
+                        {gmailConnected ? '✅ Connected to Gmail' : '❌ Not Connected'}
+                      </p>
+                      
+                      {!gmailConnected ? (
+                        <div>
+                          <p>Connect Gmail to automatically import calendar events from your emails.</p>
+                          <button 
+                            style={{...styles.modalButton, ...styles.primaryButton}}
+                            onClick={handleGmailConnect}
+                          >
+                            Connect Gmail
+                          </button>
                         </div>
-                      ))}
+                      ) : (
+                        <div>
+                          <button 
+                            style={{...styles.modalButton, ...styles.primaryButton}}
+                            onClick={handleImportFromGmail}
+                            disabled={loadingEmails}
+                          >
+                            {loadingEmails ? 'Importing...' : 'Import Recent Events'}
+                          </button>
+                          <button 
+                            style={{...styles.modalButton, ...styles.dangerButton}}
+                            onClick={handleGmailDisconnect}
+                          >
+                            Disconnect Gmail
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
-                
-                <div style={styles.modalButtons}>
-                  <button 
-                    type="button"
-                    style={{...styles.modalButton, ...styles.secondaryButton}}
-                    onClick={() => setShowGmailIntegration(false)}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
-        {/* System Settings Modal */}
-        {showSystemSettings && (
-          <div style={styles.modalOverlay} onClick={() => setShowSystemSettings(false)}>
-            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-              <div style={styles.modalHeader}>
-                <span>⚙️ System Settings</span>
-              </div>
-              
-              <div style={styles.modalForm}>
-                <div style={styles.settingsSection}>
-                  <h4>Application Info</h4>
-                  {systemInfo && (
-                    <div style={{ color: '#666', fontSize: '14px' }}>
-                      <p><strong>Version:</strong> {systemInfo.version}</p>
-                      <p><strong>Platform:</strong> {systemInfo.platform}</p>
+                    {gmailEmails.length > 0 && (
+                      <div style={styles.settingsSection}>
+                        <h4>Recent Emails ({gmailEmails.length})</h4>
+                        <div style={{ maxHeight: '200px', overflow: 'auto' }}>
+                          {gmailEmails.map((email, index) => (
+                            <div key={email.id || index} style={styles.emailItem}>
+                              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{email.subject}</div>
+                              <div style={{ fontSize: '12px', color: '#666' }}>From: {email.from}</div>
+                              <div style={{ fontSize: '12px', color: '#999' }}>{email.snippet}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    <div style={styles.modalButtons}>
                       <button 
-                        style={{...styles.modalButton, ...styles.primaryButton}}
-                        onClick={async () => {
-                          if (window.electronAPI) {
-                            await window.electronAPI.checkForUpdates();
-                          }
-                        }}
+                        type="button"
+                        style={{...styles.modalButton, ...styles.secondaryButton}}
+                        onClick={() => setShowGmailIntegration(false)}
                       >
-                        Check for Updates
+                        Close
                       </button>
                     </div>
-                  )}
-                </div>
-
-                <div style={styles.settingsSection}>
-                  <h4>Keyboard Shortcuts</h4>
-                  <div style={{ color: '#666', fontSize: '14px' }}>
-                    <p><strong>Ctrl+Shift+N:</strong> Quick add event</p>
-                    <p><strong>Ctrl+Shift+F:</strong> Show/hide FlowGenius</p>
-                    <p><strong>Ctrl+Shift+T:</strong> View today's events</p>
                   </div>
                 </div>
+              </div>
+            )}
 
-                <div style={styles.settingsSection}>
-                  <h4>System Tray</h4>
-                  <p style={{ color: '#666', fontSize: '14px' }}>
-                    FlowGenius runs in the system tray when minimized. Right-click the tray icon to access quick actions and upcoming events.
-                  </p>
-                </div>
+            {/* System Settings Modal */}
+            {showSystemSettings && (
+              <div style={styles.modalOverlay} onClick={() => setShowSystemSettings(false)}>
+                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                  <div style={styles.modalHeader}>
+                    <span>⚙️ System Settings</span>
+                  </div>
+                  
+                  <div style={styles.modalForm}>
+                    <div style={styles.settingsSection}>
+                      <h4>Application Info</h4>
+                      {systemInfo && (
+                        <div style={{ color: '#666', fontSize: '14px' }}>
+                          <p><strong>Version:</strong> {systemInfo.version}</p>
+                          <p><strong>Platform:</strong> {systemInfo.platform}</p>
+                          <button 
+                            style={{...styles.modalButton, ...styles.primaryButton}}
+                            onClick={async () => {
+                              if (window.electronAPI) {
+                                await window.electronAPI.checkForUpdates();
+                              }
+                            }}
+                          >
+                            Check for Updates
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
-                <div style={styles.settingsSection}>
-                  <h4>Auto-Startup</h4>
-                  <p style={{ color: '#4caf50', fontSize: '14px' }}>
-                    ✅ FlowGenius will start automatically when you boot your computer
-                  </p>
-                </div>
-                
-                <div style={styles.modalButtons}>
-                  <button 
-                    type="button"
-                    style={{...styles.modalButton, ...styles.secondaryButton}}
-                    onClick={() => setShowSystemSettings(false)}
-                  >
-                    Close
-                  </button>
+                    <div style={styles.settingsSection}>
+                      <h4>Keyboard Shortcuts</h4>
+                      <div style={{ color: '#666', fontSize: '14px' }}>
+                        <p><strong>Ctrl+Shift+N:</strong> Quick add event</p>
+                        <p><strong>Ctrl+Shift+F:</strong> Show/hide FlowGenius</p>
+                        <p><strong>Ctrl+Shift+T:</strong> View today's events</p>
+                      </div>
+                    </div>
+
+                    <div style={styles.settingsSection}>
+                      <h4>System Tray</h4>
+                      <p style={{ color: '#666', fontSize: '14px' }}>
+                        FlowGenius runs in the system tray when minimized. Right-click the tray icon to access quick actions and upcoming events.
+                      </p>
+                    </div>
+
+                    <div style={styles.settingsSection}>
+                      <h4>Auto-Startup</h4>
+                      <p style={{ color: '#4caf50', fontSize: '14px' }}>
+                        ✅ FlowGenius will start automatically when you boot your computer
+                      </p>
+                    </div>
+                    
+                    <div style={styles.modalButtons}>
+                      <button 
+                        type="button"
+                        style={{...styles.modalButton, ...styles.secondaryButton}}
+                        onClick={() => setShowSystemSettings(false)}
+                      >
+                        Close
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
+
           </div>
-        )}
-
-
-      </div>
+        </LocalizationProvider>
+      </ThemeProvider>
     );
   }
 
   if (authLoading) {
     return (
-      <div style={styles.container}>
-        <div style={styles.loginBox}>
-          <h1 style={styles.title}>🚀 FlowGenius</h1>
-          <p style={styles.subtitle}>Loading...</p>
-        </div>
-      </div>
+      <ThemeProvider theme={theme}>
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
+          <CssBaseline />
+          <div style={styles.container}>
+            <div style={styles.loginBox}>
+              <h1 style={styles.title}>🚀 FlowGenius</h1>
+              <p style={styles.subtitle}>Loading...</p>
+            </div>
+          </div>
+        </LocalizationProvider>
+      </ThemeProvider>
     );
   }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.loginBox}>
-        <h1 style={styles.title}>🚀 FlowGenius</h1>
-        <p style={styles.subtitle}>Your Productivity & Planning Companion</p>
-        
-        <div style={{ textAlign: 'center', padding: '20px' }}>
-          <p style={{ color: '#666', marginBottom: '20px' }}>
-            Please sign in to access your productivity dashboard
-          </p>
-          <button 
-            style={{...styles.button, fontSize: '18px', padding: '12px 24px'}}
-            onClick={() => setShowAuthModal(true)}
-          >
-            Get Started
-          </button>
-        </div>
-        
-        {authError && (
-          <p style={{ textAlign: 'center', marginTop: '16px', color: '#e53e3e', fontSize: '14px' }}>
-            {authError}
-          </p>
-        )}
-      </div>
+    <ThemeProvider theme={theme}>
+      <LocalizationProvider dateAdapter={AdapterDayjs}>
+        <CssBaseline />
+        <div style={styles.container}>
+          <div style={styles.loginBox}>
+            <h1 style={styles.title}>🚀 FlowGenius</h1>
+            <p style={styles.subtitle}>Your Productivity & Planning Companion</p>
+            
+            <div style={{ textAlign: 'center', padding: '20px' }}>
+              <p style={{ color: '#666', marginBottom: '20px' }}>
+                Please sign in to access your productivity dashboard
+              </p>
+              <button 
+                style={{...styles.button, fontSize: '18px', padding: '12px 24px'}}
+                onClick={() => setShowAuthModal(true)}
+              >
+                Get Started
+              </button>
+            </div>
+            
+            {authError && (
+              <p style={{ textAlign: 'center', marginTop: '16px', color: '#e53e3e', fontSize: '14px' }}>
+                {authError}
+              </p>
+            )}
+          </div>
 
-      <AuthModal
-        isVisible={showAuthModal}
-        onSuccess={handleAuthSuccess}
-        onError={handleAuthError}
-      />
-    </div>
+          <AuthModal
+            isVisible={showAuthModal}
+            onSuccess={handleAuthSuccess}
+            onError={handleAuthError}
+          />
+        </div>
+      </LocalizationProvider>
+    </ThemeProvider>
   );
 };
 
