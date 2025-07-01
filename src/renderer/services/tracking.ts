@@ -62,24 +62,28 @@ class AppTrackingService {
     console.log('🔧 Initializing AppTrackingService...');
     this.loadSettings();
     this.setupActivityDetection();
-    this.setupRealTracking();
     
-    // FORCE start real tracking immediately if available
-    if (this.isUsingRealTracking) {
-      console.log('🚀 FORCE starting real app tracking in 1 second...');
-      setTimeout(() => {
-        this.startTracking().catch(error => {
-          console.error('❌ Failed to auto-start tracking:', error);
-        });
-      }, 1000); // Start quickly after initialization
-    } else {
-      console.error('💥 Real tracking NOT available - check Electron API');
-    }
+    // Delay real tracking setup to allow time for Electron API to be available
+    setTimeout(() => {
+      this.setupRealTracking();
+      
+      // FORCE start real tracking immediately if available
+      if (this.isUsingRealTracking) {
+        console.log('🚀 FORCE starting real app tracking in 1 second...');
+        setTimeout(() => {
+          this.startTracking().catch(error => {
+            console.error('❌ Failed to auto-start tracking:', error);
+          });
+        }, 1000); // Start quickly after initialization
+      } else {
+        console.log('📊 Electron API not available - tracking service will use mock mode');
+      }
+    }, 500); // Give 500ms for Electron API to be ready
   }
 
   private setupRealTracking(): void {
     // Check if we have access to electron API
-    if (window.electronAPI) {
+    if (typeof window !== 'undefined' && window.electronAPI) {
       this.isUsingRealTracking = true;
       console.log('📊 Using real Windows app tracking');
       
@@ -101,6 +105,8 @@ class AppTrackingService {
       });
     } else {
       console.log('📊 Using mock app tracking (no Electron API available)');
+      // Set a flag to indicate we're not in Electron environment
+      this.isUsingRealTracking = false;
     }
   }
 
@@ -206,7 +212,7 @@ class AppTrackingService {
     console.log('🚀 startTracking() called');
     console.log('📊 Settings enabled:', this.settings.enabled);
     console.log('📊 Is using real tracking:', this.isUsingRealTracking);
-    console.log('📊 Has electronAPI:', !!window.electronAPI);
+    console.log('📊 Has electronAPI:', !!(typeof window !== 'undefined' && window.electronAPI));
 
     if (!this.settings.enabled) {
       console.log('⚠️ Tracking disabled in settings');
@@ -221,7 +227,7 @@ class AppTrackingService {
     this.isTracking = true;
     console.log('✅ Started app usage tracking');
 
-    if (this.isUsingRealTracking && window.electronAPI) {
+    if (this.isUsingRealTracking && typeof window !== 'undefined' && window.electronAPI) {
       // Use ONLY real Windows app tracking - NO MOCK DATA
       console.log('🔥 FORCING REAL Windows app tracking...');
       try {
@@ -237,11 +243,8 @@ class AppTrackingService {
         return;
       }
     } else {
-      // This should NOT happen in Electron - but if it does, log it clearly
-      console.error('💥 ELECTRON API NOT AVAILABLE - Cannot use real tracking!');
-      console.error('📊 electronAPI available:', !!window.electronAPI);
-      console.error('📊 isUsingRealTracking:', this.isUsingRealTracking);
-      
+      // Gracefully handle non-Electron environments
+      console.log('📊 Running in non-Electron environment - tracking service disabled');
       this.isTracking = false;
       return;
     }
@@ -257,7 +260,7 @@ class AppTrackingService {
 
     this.isTracking = false;
     
-    if (this.isUsingRealTracking && window.electronAPI) {
+    if (this.isUsingRealTracking && typeof window !== 'undefined' && window.electronAPI) {
       // Stop real Windows app tracking
       const trackingEnabled = await window.electronAPI.toggleAppTracking(false);
       console.log('📊 Real tracking stopped:', !trackingEnabled);
@@ -525,7 +528,7 @@ class AppTrackingService {
   }
 
   public async getRealTrackingStatus(): Promise<any> {
-    if (this.isUsingRealTracking && window.electronAPI) {
+    if (this.isUsingRealTracking && typeof window !== 'undefined' && window.electronAPI) {
       try {
         return await window.electronAPI.getAppUsageData();
       } catch (error) {

@@ -43,6 +43,16 @@ interface EnhancedEventModalProps {
   selectedDate?: Date;
 }
 
+// Proper error type for form validation
+interface FormErrors {
+  title?: string;
+  description?: string;
+  startTime?: string;
+  endTime?: string;
+  location?: string;
+  attendees?: string;
+}
+
 const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
   open,
   onClose,
@@ -65,7 +75,7 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
 
   const [showSmartSuggestions, setShowSmartSuggestions] = useState(true);
   const [attendeesInput, setAttendeesInput] = useState('');
-  const [errors, setErrors] = useState<Partial<EventFormData>>({});
+  const [errors, setErrors] = useState<FormErrors>({});
 
   useEffect(() => {
     if (event) {
@@ -103,7 +113,7 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
   }, [event, selectedDate, open]);
 
   const validateForm = (): boolean => {
-    const newErrors: Partial<EventFormData> = {};
+    const newErrors: FormErrors = {};
 
     if (!formData.title.trim()) {
       newErrors.title = 'Title is required';
@@ -148,7 +158,7 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
     }));
 
     // Clear error when user starts typing
-    if (errors[field]) {
+    if (errors[field as keyof FormErrors]) {
       setErrors(prev => ({
         ...prev,
         [field]: undefined
@@ -199,76 +209,75 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
       </DialogTitle>
 
       <DialogContent dividers>
-        <Grid container spacing={3}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
           {/* Event Details Section */}
-          <Grid item xs={12}>
-            <Box>
-              <TextField
-                fullWidth
-                label="Event Title"
-                value={formData.title}
-                onChange={(e) => handleInputChange('title', e.target.value)}
-                error={!!errors.title}
-                helperText={errors.title}
-                margin="normal"
-                required
-                autoFocus
-              />
+          <Box>
+            <TextField
+              fullWidth
+              label="Event Title"
+              value={formData.title}
+              onChange={(e) => handleInputChange('title', e.target.value)}
+              error={!!errors.title}
+              helperText={errors.title}
+              margin="normal"
+              required
+              autoFocus
+            />
 
-              <TextField
-                fullWidth
-                label="Description"
-                value={formData.description}
-                onChange={(e) => handleInputChange('description', e.target.value)}
-                multiline
-                rows={3}
-                margin="normal"
-                placeholder="Add event details, agenda, or notes..."
-              />
+            <TextField
+              fullWidth
+              label="Description"
+              value={formData.description || ''}
+              onChange={(e) => handleInputChange('description', e.target.value)}
+              multiline
+              rows={3}
+              margin="normal"
+              placeholder="Add event details, agenda, or notes..."
+            />
 
-              {/* Date and Time Section */}
-              <Box mt={2} mb={2}>
-                <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <AccessTime fontSize="small" />
-                  Date & Time
-                </Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6}>
-                    <DateTimePicker
-                      label="Start Time"
-                      value={dayjs(formData.startTime)}
-                      onChange={(newValue) => newValue && handleInputChange('startTime', newValue.toDate())}
-                      slotProps={{
-                        textField: {
-                          fullWidth: true,
-                          error: !!errors.startTime,
-                          helperText: errors.startTime
-                        }
-                      }}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <DateTimePicker
-                      label="End Time"
-                      value={dayjs(formData.endTime)}
-                      onChange={(newValue) => newValue && handleInputChange('endTime', newValue.toDate())}
-                      slotProps={{
-                        textField: {
-                          fullWidth: true,
-                          error: !!errors.endTime,
-                          helperText: errors.endTime
-                        }
-                      }}
-                    />
-                  </Grid>
-                </Grid>
+            {/* Date and Time Section */}
+            <Box mt={2} mb={2}>
+              <Typography variant="subtitle2" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <AccessTime fontSize="small" />
+                Date & Time
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
+                <Box sx={{ flex: 1 }}>
+                  <DateTimePicker
+                    label="Start Time"
+                    value={dayjs(formData.startTime)}
+                    onChange={(newValue) => newValue && handleInputChange('startTime', newValue.toDate())}
+                    slotProps={{
+                      textField: {
+                        fullWidth: true,
+                        error: !!errors.startTime,
+                        helperText: errors.startTime
+                      }
+                    }}
+                  />
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <DateTimePicker
+                    label="End Time"
+                    value={dayjs(formData.endTime)}
+                    onChange={(newValue) => newValue && handleInputChange('endTime', newValue.toDate())}
+                    slotProps={{
+                      textField: {
+                        fullWidth: true,
+                        error: !!errors.endTime,
+                        helperText: errors.endTime
+                      }
+                    }}
+                  />
+                </Box>
               </Box>
+            </Box>
 
               {/* Smart Scheduling Suggestions - Right under Date & Time */}
               {showSmartSuggestions && !event && (
                 <SmartSchedulingSuggestions
                   title={formData.title}
-                  description={formData.description}
+                  description={formData.description || ''}
                   preferredDate={selectedDate}
                   existingEvents={existingEvents}
                   onTimeSlotSelect={handleTimeSlotSelect}
@@ -346,10 +355,8 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
                   </Select>
                 </FormControl>
               )}
-            </Box>
-          </Grid>
-
-        </Grid>
+          </Box>
+        </Box>
       </DialogContent>
 
       <DialogActions>

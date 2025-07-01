@@ -10,7 +10,12 @@ import {
   Alert,
   Divider,
   Stack,
-  IconButton
+  IconButton,
+  Tooltip,
+  LinearProgress,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails
 } from '@mui/material';
 import {
   Psychology,
@@ -19,15 +24,18 @@ import {
   Business,
   SportsEsports,
   Person,
-  Close
+  Close,
+  Speed,
+  Timeline,
+  AutoFixHigh,
+  ExpandMore
 } from '@mui/icons-material';
 import { Event } from '../../services/supabase';
-import {
-  SmartSchedulingResult,
-  TimeSlotSuggestion,
+import smartSchedulingPipeline, {
+  SmartSchedulingPipelineResult,
   EventClassification,
-  smartSchedulingService
-} from '../../services/smartScheduling';
+  TimeSlotSuggestion
+} from '../../services/smartSchedulingPipeline';
 import dayjs from 'dayjs';
 
 interface SmartSchedulingSuggestionsProps {
@@ -47,9 +55,11 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
   onTimeSlotSelect,
   onClose
 }) => {
-  const [suggestions, setSuggestions] = useState<SmartSchedulingResult | null>(null);
+  const [suggestions, setSuggestions] = useState<SmartSchedulingPipelineResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pipelineProgress, setPipelineProgress] = useState(0);
+  const [showMetadata, setShowMetadata] = useState(false);
 
   useEffect(() => {
     if (title.trim()) {
@@ -62,20 +72,30 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
 
     setLoading(true);
     setError(null);
+    setPipelineProgress(0);
 
     try {
-      const result = await smartSchedulingService.getSchedulingSuggestions(
+      // Simulate pipeline progress for better UX
+      const progressInterval = setInterval(() => {
+        setPipelineProgress(prev => Math.min(prev + 20, 90));
+      }, 200);
+
+      const result = await smartSchedulingPipeline.executeSchedulingPipeline(
         title,
         description,
         preferredDate,
         existingEvents
       );
+
+      clearInterval(progressInterval);
+      setPipelineProgress(100);
       setSuggestions(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate suggestions');
-      console.error('Smart scheduling error:', err);
+      console.error('Smart scheduling pipeline error:', err);
     } finally {
       setLoading(false);
+      setTimeout(() => setPipelineProgress(0), 1000);
     }
   };
 
@@ -124,6 +144,14 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
     return { label: 'Available', color: 'default' as const };
   };
 
+  const getOptimalityScore = (suggestion: TimeSlotSuggestion) => {
+    const score = suggestion.optimalityScore || 0;
+    if (score >= 90) return { label: 'Perfect', color: '#4caf50' };
+    if (score >= 70) return { label: 'Great', color: '#2196f3' };
+    if (score >= 50) return { label: 'Good', color: '#ff9800' };
+    return { label: 'OK', color: '#757575' };
+  };
+
   if (!title.trim()) {
     return (
       <Card sx={{ mt: 2 }}>
@@ -143,14 +171,38 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
           <Box display="flex" alignItems="center">
             <Psychology color="primary" sx={{ mr: 1 }} />
             <Typography variant="h6" component="div">
-              Smart Scheduling Suggestions
+              AI-Powered Smart Scheduling
             </Typography>
             {loading && <CircularProgress size={20} sx={{ ml: 2 }} />}
+            {suggestions?.pipelineMetadata.refinementApplied && (
+              <Tooltip title="Advanced AI refinement applied">
+                <AutoFixHigh color="secondary" sx={{ ml: 1 }} fontSize="small" />
+              </Tooltip>
+            )}
           </Box>
           <IconButton size="small" onClick={onClose} title="Hide Suggestions">
             <Close fontSize="small" />
           </IconButton>
         </Box>
+
+        {/* Pipeline Progress */}
+        {loading && pipelineProgress > 0 && (
+          <Box mb={2}>
+            <Box display="flex" alignItems="center" justifyContent="space-between">
+              <Typography variant="caption" color="text.secondary">
+                AI Pipeline Processing...
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                {pipelineProgress}%
+              </Typography>
+            </Box>
+            <LinearProgress 
+              variant="determinate" 
+              value={pipelineProgress}
+              sx={{ mt: 0.5, borderRadius: 1 }}
+            />
+          </Box>
+        )}
 
         {error && (
           <Alert severity="error" sx={{ mb: 2 }}>
@@ -163,12 +215,12 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
 
         {suggestions && (
           <>
-            {/* Event Classification */}
+            {/* Enhanced Event Classification */}
             <Box mb={2}>
               <Typography variant="subtitle2" gutterBottom>
-                Event Classification
+                AI Event Classification
               </Typography>
-              <Box display="flex" alignItems="center" gap={1}>
+              <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
                 <Chip
                   icon={getClassificationIcon(suggestions.classification.type)}
                   label={suggestions.classification.type.charAt(0).toUpperCase() + suggestions.classification.type.slice(1)}
@@ -183,15 +235,28 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                   variant="outlined"
                   size="small"
                 />
+                {suggestions.classification.keywords && suggestions.classification.keywords.length > 0 && (
+                  <Chip
+                    label={`${suggestions.classification.keywords.length} keywords`}
+                    variant="outlined"
+                    size="small"
+                    color="secondary"
+                  />
+                )}
               </Box>
               <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
                 {suggestions.classification.reasoning}
               </Typography>
+              {suggestions.classification.context && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', fontStyle: 'italic' }}>
+                  Context: {suggestions.classification.context}
+                </Typography>
+              )}
             </Box>
 
             <Divider sx={{ mb: 2 }} />
 
-            {/* Duration Estimate */}
+            {/* Enhanced Duration Estimate */}
             <Box mb={2}>
               <Typography variant="subtitle2" gutterBottom>
                 Estimated Duration
@@ -201,14 +266,20 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                 <Typography variant="body2">
                   {Math.floor(suggestions.duration / 60)}h {suggestions.duration % 60}m
                 </Typography>
+                <Chip
+                  label="AI Optimized"
+                  size="small"
+                  variant="outlined"
+                  color="primary"
+                />
               </Box>
             </Box>
 
             <Divider sx={{ mb: 2 }} />
 
-            {/* Time Slot Suggestions */}
+            {/* Enhanced Time Slot Suggestions */}
             <Typography variant="subtitle2" gutterBottom>
-              Suggested Time Slots
+              Optimized Time Slots
             </Typography>
 
             {suggestions.suggestedSlots.length === 0 ? (
@@ -220,6 +291,7 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                 {suggestions.suggestedSlots.map((suggestion, index) => {
                   const timeInfo = formatTimeSlot(suggestion);
                   const priorityInfo = getPriorityLabel(suggestion.priority);
+                  const optimalityInfo = getOptimalityScore(suggestion);
 
                   return (
                     <Card
@@ -228,16 +300,18 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                       sx={{
                         cursor: 'pointer',
                         transition: 'all 0.2s',
+                        position: 'relative',
                         '&:hover': {
                           backgroundColor: 'action.hover',
-                          transform: 'translateY(-1px)'
+                          transform: 'translateY(-1px)',
+                          boxShadow: 2
                         }
                       }}
                       onClick={() => onTimeSlotSelect(suggestion.startTime, suggestion.endTime)}
                     >
                       <CardContent sx={{ py: 1.5, '&:last-child': { pb: 1.5 } }}>
                         <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-                          <Box>
+                          <Box flex={1}>
                             <Typography variant="subtitle2" color="primary">
                               {timeInfo.date}
                             </Typography>
@@ -247,7 +321,26 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                             <Typography variant="caption" color="text.secondary">
                               {suggestion.reasoning}
                             </Typography>
+                            
+                            {/* Enhanced metrics */}
+                            <Box display="flex" gap={0.5} mt={0.5}>
+                              {suggestion.conflictScore !== undefined && suggestion.conflictScore === 0 && (
+                                <Chip label="No Conflicts" size="small" color="success" variant="outlined" />
+                              )}
+                              {suggestion.optimalityScore !== undefined && suggestion.optimalityScore >= 80 && (
+                                <Chip 
+                                  label={optimalityInfo.label} 
+                                  size="small" 
+                                  sx={{ 
+                                    backgroundColor: optimalityInfo.color, 
+                                    color: 'white',
+                                    fontSize: '0.7rem'
+                                  }} 
+                                />
+                              )}
+                            </Box>
                           </Box>
+                          
                           <Box textAlign="right">
                             <Chip
                               label={priorityInfo.label}
@@ -258,6 +351,11 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                             <Typography variant="caption" display="block" color="text.secondary">
                               {timeInfo.duration}
                             </Typography>
+                            {suggestion.priority && (
+                              <Typography variant="caption" display="block" color="text.secondary">
+                                Score: {Math.round(suggestion.priority)}
+                              </Typography>
+                            )}
                           </Box>
                         </Box>
                       </CardContent>
@@ -267,7 +365,79 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
               </Stack>
             )}
 
-            <Box display="flex" justifyContent="flex-start" mt={2}>
+            {/* Pipeline Metadata Accordion */}
+            {suggestions.pipelineMetadata && (
+              <Accordion sx={{ mt: 2 }} expanded={showMetadata} onChange={() => setShowMetadata(!showMetadata)}>
+                <AccordionSummary expandIcon={<ExpandMore />}>
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Timeline fontSize="small" />
+                    <Typography variant="subtitle2">
+                      Pipeline Analytics
+                    </Typography>
+                    <Chip 
+                      label={`${suggestions.pipelineMetadata.stepsExecuted.length} steps`}
+                      size="small"
+                      variant="outlined"
+                    />
+                  </Box>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Stack spacing={1}>
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Processing Time:
+                      </Typography>
+                      <Typography variant="body2">
+                        {suggestions.pipelineMetadata.totalProcessingTime}ms
+                      </Typography>
+                    </Box>
+                    
+                    <Box>
+                      <Typography variant="caption" color="text.secondary">
+                        Pipeline Steps:
+                      </Typography>
+                      <Box display="flex" gap={0.5} flexWrap="wrap" mt={0.5}>
+                        {suggestions.pipelineMetadata.stepsExecuted.map((step, idx) => (
+                          <Chip 
+                            key={idx}
+                            label={step}
+                            size="small"
+                            variant="outlined"
+                            color="primary"
+                          />
+                        ))}
+                      </Box>
+                    </Box>
+
+                    {suggestions.pipelineMetadata.confidenceEvolution.length > 1 && (
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          Confidence Evolution:
+                        </Typography>
+                        <Box display="flex" gap={0.5} mt={0.5}>
+                          {suggestions.pipelineMetadata.confidenceEvolution.map((conf, idx) => (
+                            <Chip 
+                              key={idx}
+                              label={`${Math.round(conf * 100)}%`}
+                              size="small"
+                              color={idx === suggestions.pipelineMetadata.confidenceEvolution.length - 1 ? 'primary' : 'default'}
+                            />
+                          ))}
+                        </Box>
+                      </Box>
+                    )}
+
+                    {suggestions.pipelineMetadata.refinementApplied && (
+                      <Alert severity="info" sx={{ mt: 1 }}>
+                        Advanced AI refinement was applied to improve classification accuracy.
+                      </Alert>
+                    )}
+                  </Stack>
+                </AccordionDetails>
+              </Accordion>
+            )}
+
+            <Box display="flex" justifyContent="space-between" alignItems="center" mt={2}>
               <Button
                 size="small"
                 startIcon={<TrendingUp />}
@@ -276,6 +446,13 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
               >
                 Refresh Suggestions
               </Button>
+              
+              <Box display="flex" alignItems="center" gap={1}>
+                <Speed fontSize="small" color="action" />
+                <Typography variant="caption" color="text.secondary">
+                  Powered by Multi-Step AI Pipeline
+                </Typography>
+              </Box>
             </Box>
           </>
         )}

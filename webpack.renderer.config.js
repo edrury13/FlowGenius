@@ -30,6 +30,7 @@ module.exports = {
       'process.env.SUPABASE_ANON_KEY': JSON.stringify(process.env.SUPABASE_ANON_KEY),
       'process.env.GOOGLE_CLIENT_ID': JSON.stringify(process.env.GOOGLE_CLIENT_ID),
       'process.env.GOOGLE_CLIENT_SECRET': JSON.stringify(process.env.GOOGLE_CLIENT_SECRET),
+      'process.env.OPENAI_API_KEY': JSON.stringify(process.env.OPENAI_API_KEY),
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
     }),
   ],
