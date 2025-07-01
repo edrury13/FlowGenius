@@ -76,6 +76,10 @@ const App: React.FC = () => {
   
   // Analytics state
   const [showAnalytics, setShowAnalytics] = useState(false);
+  
+  // System settings state
+  const [showSystemSettings, setShowSystemSettings] = useState(false);
+  const [systemInfo, setSystemInfo] = useState<any>(null);
 
   // Load events from localStorage on mount
   useEffect(() => {
@@ -132,9 +136,44 @@ const App: React.FC = () => {
       }
     );
 
+    // Setup IPC event listeners for system tray integration
+    if (window.electronAPI) {
+      // Listen for quick add event from tray/shortcut
+      window.electronAPI.onQuickAddEvent(() => {
+        setShowEventModal(true);
+        setEditingEvent(null);
+        resetEventForm();
+      });
+      
+      // Listen for show today's events from tray/shortcut
+      window.electronAPI.onShowTodayEvents(() => {
+        setCurrentView('day');
+        setCurrentDate(new Date());
+      });
+      
+      // Listen for focus event from tray
+      window.electronAPI.onFocusEvent((event: Event) => {
+        setEditingEvent(event);
+        setShowEventModal(true);
+      });
+      
+      // Listen for open settings from tray
+      window.electronAPI.onOpenSettings(() => {
+        setShowNotificationSettings(true);
+      });
+    }
+
     // Cleanup subscription on unmount
     return () => {
       subscription.unsubscribe();
+      
+      // Remove IPC listeners
+      if (window.electronAPI) {
+        window.electronAPI.removeAllListeners('quick-add-event');
+        window.electronAPI.removeAllListeners('show-today-events');
+        window.electronAPI.removeAllListeners('focus-event');
+        window.electronAPI.removeAllListeners('open-settings');
+      }
     };
   }, []);
 
@@ -169,12 +208,48 @@ const App: React.FC = () => {
     const trackingSettings = trackingService.getSettings();
     console.log('📊 Loaded tracking settings:', trackingSettings);
     
+    // Load system info
+    if (window.electronAPI) {
+      try {
+        const appInfo = await window.electronAPI.getAppInfo();
+        setSystemInfo(appInfo);
+        console.log('⚙️ Loaded system info:', appInfo);
+      } catch (error) {
+        console.error('Failed to load system info:', error);
+      }
+    }
+    
     setAuthLoading(false);
   };
 
   // Save events to localStorage whenever events change
   useEffect(() => {
     localStorage.setItem('flowgenius-events', JSON.stringify(events));
+    
+    // Update system tray with upcoming events
+    if (window.electronAPI && events.length > 0) {
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      
+      // Get upcoming events for today and tomorrow
+      const upcomingEvents = events.filter(event => {
+        const eventDate = event.date;
+        return eventDate === today || eventDate === tomorrow;
+      }).sort((a, b) => {
+        const dateA = new Date(`${a.date} ${a.startTime || '00:00'}`);
+        const dateB = new Date(`${b.date} ${b.startTime || '00:00'}`);
+        return dateA.getTime() - dateB.getTime();
+      }).slice(0, 5); // Limit to 5 events
+      
+      // Transform events for tray display
+      const trayEvents = upcomingEvents.map(event => ({
+        ...event,
+        start_time: new Date(`${event.date} ${event.startTime || '00:00'}`).toISOString()
+      }));
+      
+      window.electronAPI.updateUpcomingEvents(trayEvents);
+    }
   }, [events]);
 
   // Cleanup tracking service on logout or unmount
@@ -1302,6 +1377,13 @@ const App: React.FC = () => {
               📊
             </button>
             <button 
+              style={styles.headerButton}
+              onClick={() => setShowSystemSettings(true)}
+              title="System Settings & Shortcuts"
+            >
+              ⚙️
+            </button>
+            <button 
               style={styles.logoutButton}
               onClick={handleLogout}
             >
@@ -1662,6 +1744,72 @@ const App: React.FC = () => {
                     type="button"
                     style={{...styles.modalButton, ...styles.secondaryButton}}
                     onClick={() => setShowGmailIntegration(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* System Settings Modal */}
+        {showSystemSettings && (
+          <div style={styles.modalOverlay} onClick={() => setShowSystemSettings(false)}>
+            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+              <div style={styles.modalHeader}>
+                <span>⚙️ System Settings</span>
+              </div>
+              
+              <div style={styles.modalForm}>
+                <div style={styles.settingsSection}>
+                  <h4>Application Info</h4>
+                  {systemInfo && (
+                    <div style={{ color: '#666', fontSize: '14px' }}>
+                      <p><strong>Version:</strong> {systemInfo.version}</p>
+                      <p><strong>Platform:</strong> {systemInfo.platform}</p>
+                      <button 
+                        style={{...styles.modalButton, ...styles.primaryButton}}
+                        onClick={async () => {
+                          if (window.electronAPI) {
+                            await window.electronAPI.checkForUpdates();
+                          }
+                        }}
+                      >
+                        Check for Updates
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div style={styles.settingsSection}>
+                  <h4>Keyboard Shortcuts</h4>
+                  <div style={{ color: '#666', fontSize: '14px' }}>
+                    <p><strong>Ctrl+Shift+N:</strong> Quick add event</p>
+                    <p><strong>Ctrl+Shift+F:</strong> Show/hide FlowGenius</p>
+                    <p><strong>Ctrl+Shift+T:</strong> View today's events</p>
+                  </div>
+                </div>
+
+                <div style={styles.settingsSection}>
+                  <h4>System Tray</h4>
+                  <p style={{ color: '#666', fontSize: '14px' }}>
+                    FlowGenius runs in the system tray when minimized. Right-click the tray icon to access quick actions and upcoming events.
+                  </p>
+                </div>
+
+                <div style={styles.settingsSection}>
+                  <h4>Auto-Startup</h4>
+                  <p style={{ color: '#4caf50', fontSize: '14px' }}>
+                    ✅ FlowGenius will start automatically when you boot your computer
+                  </p>
+                </div>
+                
+                <div style={styles.modalButtons}>
+                  <button 
+                    type="button"
+                    style={{...styles.modalButton, ...styles.secondaryButton}}
+                    onClick={() => setShowSystemSettings(false)}
                   >
                     Close
                   </button>

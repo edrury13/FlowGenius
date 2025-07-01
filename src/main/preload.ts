@@ -14,8 +14,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onQuickAddEvent: (callback: () => void) => 
     ipcRenderer.on('quick-add-event', callback),
   
+  onShowTodayEvents: (callback: () => void) => 
+    ipcRenderer.on('show-today-events', callback),
+  
+  onFocusEvent: (callback: (event: any) => void) => 
+    ipcRenderer.on('focus-event', callback),
+  
   onOpenSettings: (callback: () => void) => 
     ipcRenderer.on('open-settings', callback),
+  
+  // Auto-updater
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  
+  getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  
+  // Update upcoming events in tray
+  updateUpcomingEvents: (events: any[]) => 
+    ipcRenderer.send('update-upcoming-events', events),
   
   // Remove listeners
   removeAllListeners: (channel: string) => 
@@ -29,7 +44,17 @@ declare global {
       getAppUsageData: () => Promise<any[]>;
       showNotification: (options: { title: string; body: string }) => Promise<void>;
       onQuickAddEvent: (callback: () => void) => void;
+      onShowTodayEvents: (callback: () => void) => void;
+      onFocusEvent: (callback: (event: any) => void) => void;
       onOpenSettings: (callback: () => void) => void;
+      checkForUpdates: () => Promise<void>;
+      getAppInfo: () => Promise<{
+        version: string;
+        name: string;
+        platform: string;
+        shortcuts: string[];
+      }>;
+      updateUpcomingEvents: (events: any[]) => void;
       removeAllListeners: (channel: string) => void;
     };
   }
