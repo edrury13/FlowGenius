@@ -13,7 +13,7 @@ import AuthModal from './components/Auth/AuthModal';
 import EnhancedEventModal from './components/Events/EnhancedEventModal';
 import OnboardingTutorial from './components/Tutorial/OnboardingTutorial';
 import { ChatInterface } from './components/AIAssistant/ChatInterface';
-import { authService, type Profile } from './services/supabase';
+import { authService, eventService, type Profile } from './services/supabase';
 import { EventFormData } from './types';
 import type { User, Session } from '@supabase/supabase-js';
 import { useDispatch, useSelector } from 'react-redux';
@@ -40,6 +40,7 @@ interface Event {
     frequency: 'daily' | 'weekly' | 'monthly';
   };
   parentEventId?: string;
+  source?: 'google_calendar' | 'gmail_email' | 'local';
 }
 
 type CalendarView = 'month' | 'week' | 'day' | 'agenda';
@@ -148,6 +149,7 @@ const App: React.FC = () => {
 
   // Notification and Gmail state
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
+  const [notificationSettings, setNotificationSettings] = useState(notificationService.getSettings());
   const [showGmailIntegration, setShowGmailIntegration] = useState(false);
   const [gmailConnected, setGmailConnected] = useState(false);
   const [gmailEmails, setGmailEmails] = useState<any[]>([]);
@@ -164,41 +166,85 @@ const App: React.FC = () => {
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialCompleted, setTutorialCompleted] = useState(false);
 
-  // Load events from localStorage on mount
+  // Load events based on authentication state
   useEffect(() => {
-    const savedEvents = localStorage.getItem('flowgenius-events');
-    if (savedEvents) {
-      const parsedEvents = JSON.parse(savedEvents);
-      setEvents(parsedEvents);
-      setFilteredEvents(parsedEvents);
-    } else {
-      // Sample events
-      const sampleEvents: Event[] = [
-        { 
-          id: '1', 
-          title: 'Team Meeting', 
-          date: '2024-06-15', 
-          startTime: '10:00', 
-          endTime: '11:00',
-          category: 'meeting',
-          description: 'Weekly team sync meeting'
-        },
-        { 
-          id: '2', 
-          title: 'Project Review', 
-          date: '2024-06-22', 
-          startTime: '14:00', 
-          endTime: '15:30',
-          category: 'work',
-          attendees: ['john@example.com', 'jane@example.com']
-        },
-      ];
-      setEvents(sampleEvents);
-      setFilteredEvents(sampleEvents);
-      localStorage.setItem('flowgenius-events', JSON.stringify(sampleEvents));
-    }
+    const loadEvents = async () => {
+      if (isLoggedIn && user) {
+        // User is logged in - load their events from Supabase
+        console.log('🔍 Loading events for user:', user.id, user.email);
+        try {
+          const userEvents = await eventService.getEvents(user.id);
+          console.log('📅 Loaded', userEvents.length, 'events from Supabase:', userEvents);
+          // Convert Supabase events to local Event format
+          const localEvents = userEvents.map(event => ({
+            id: event.id,
+            title: event.title,
+            description: event.description,
+            date: event.start_time.split('T')[0], // Extract date from start_time
+            startTime: event.start_time.split('T')[1]?.substring(0, 5), // Extract time from start_time
+            endTime: event.end_time.split('T')[1]?.substring(0, 5), // Extract time from end_time
+            attendees: event.attendees,
+            category: 'personal' as Event['category'], // Default category, could be enhanced
+            isRecurring: event.is_recurring,
+            recurrenceRule: event.recurrence_rule ? {
+              frequency: event.recurrence_rule.includes('DAILY') ? 'daily' as const : 
+                        event.recurrence_rule.includes('WEEKLY') ? 'weekly' as const : 'monthly' as const
+            } : undefined,
+            parentEventId: event.parent_event_id || undefined
+          }));
+          console.log('✅ Converted to local format:', localEvents);
+          setEvents(localEvents);
+          setFilteredEvents(localEvents);
+        } catch (error) {
+          console.error('❌ Failed to load user events:', error);
+          // Fallback to empty array
+          setEvents([]);
+          setFilteredEvents([]);
+        }
+      } else {
+        // User not logged in - load from localStorage or show sample events
+        console.log('👤 No user logged in, loading from localStorage');
+        const savedEvents = localStorage.getItem('flowgenius-events');
+        if (savedEvents) {
+          const parsedEvents = JSON.parse(savedEvents);
+          console.log('📋 Loaded', parsedEvents.length, 'events from localStorage');
+          setEvents(parsedEvents);
+          setFilteredEvents(parsedEvents);
+        } else {
+          // Sample events for demo
+          console.log('🎯 Loading sample events');
+          const sampleEvents: Event[] = [
+            { 
+              id: '1', 
+              title: 'Team Meeting', 
+              date: '2024-06-15', 
+              startTime: '10:00', 
+              endTime: '11:00',
+              category: 'meeting',
+              description: 'Weekly team sync meeting'
+            },
+            { 
+              id: '2', 
+              title: 'Project Review', 
+              date: '2024-06-22', 
+              startTime: '14:00', 
+              endTime: '15:30',
+              category: 'work',
+              attendees: ['john@example.com', 'jane@example.com']
+            },
+          ];
+          setEvents(sampleEvents);
+          setFilteredEvents(sampleEvents);
+          localStorage.setItem('flowgenius-events', JSON.stringify(sampleEvents));
+        }
+      }
+    };
 
-    // Initialize services and setup auth listener
+    loadEvents();
+  }, [isLoggedIn, user]); // Reload events when authentication state changes
+
+  // Initialize services and setup auth listener
+  useEffect(() => {
     initializeServices();
 
     // Listen to auth state changes
@@ -260,6 +306,46 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // Save events based on authentication state
+  useEffect(() => {
+    if (isLoggedIn && user) {
+      // Don't save to localStorage when user is logged in - events are in Supabase
+      // Just update system tray
+      updateSystemTray();
+    } else {
+      // Save to localStorage for non-authenticated users
+      localStorage.setItem('flowgenius-events', JSON.stringify(events));
+      updateSystemTray();
+    }
+  }, [events, isLoggedIn, user]);
+
+  const updateSystemTray = () => {
+    // Update system tray with upcoming events
+    if (window.electronAPI && events.length > 0) {
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      
+      // Get upcoming events for today and tomorrow
+      const upcomingEvents = events.filter(event => {
+        const eventDate = event.date;
+        return eventDate === today || eventDate === tomorrow;
+      }).sort((a, b) => {
+        const dateA = new Date(`${a.date} ${a.startTime || '00:00'}`);
+        const dateB = new Date(`${b.date} ${b.startTime || '00:00'}`);
+        return dateA.getTime() - dateB.getTime();
+      }).slice(0, 5); // Limit to 5 events
+      
+      // Transform events for tray display
+      const trayEvents = upcomingEvents.map(event => ({
+        ...event,
+        start_time: new Date(`${event.date} ${event.startTime || '00:00'}`).toISOString()
+      }));
+      
+      window.electronAPI.updateUpcomingEvents(trayEvents);
+    }
+  };
+
   const initializeServices = async () => {
     setAuthLoading(true);
     
@@ -305,36 +391,6 @@ const App: React.FC = () => {
     setAuthLoading(false);
   };
 
-  // Save events to localStorage whenever events change
-  useEffect(() => {
-    localStorage.setItem('flowgenius-events', JSON.stringify(events));
-    
-    // Update system tray with upcoming events
-    if (window.electronAPI && events.length > 0) {
-      const now = new Date();
-      const today = now.toISOString().split('T')[0];
-      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      
-      // Get upcoming events for today and tomorrow
-      const upcomingEvents = events.filter(event => {
-        const eventDate = event.date;
-        return eventDate === today || eventDate === tomorrow;
-      }).sort((a, b) => {
-        const dateA = new Date(`${a.date} ${a.startTime || '00:00'}`);
-        const dateB = new Date(`${b.date} ${b.startTime || '00:00'}`);
-        return dateA.getTime() - dateB.getTime();
-      }).slice(0, 5); // Limit to 5 events
-      
-      // Transform events for tray display
-      const trayEvents = upcomingEvents.map(event => ({
-        ...event,
-        start_time: new Date(`${event.date} ${event.startTime || '00:00'}`).toISOString()
-      }));
-      
-      window.electronAPI.updateUpcomingEvents(trayEvents);
-    }
-  }, [events]);
-
   // Cleanup tracking service on logout or unmount
   useEffect(() => {
     return () => {
@@ -367,6 +423,7 @@ const App: React.FC = () => {
   }, [events, searchTerm, selectedCategory]);
 
   const handleAuthSuccess = async (user: User) => {
+    console.log('🎉 User login successful:', user.id, user.email);
     setUser(user);
     setIsLoggedIn(true);
     setShowAuthModal(false);
@@ -378,6 +435,7 @@ const App: React.FC = () => {
         module.profileService.getProfile(user.id)
       );
       setUserProfile(profile);
+      console.log('👤 User profile loaded:', profile);
     } catch (error) {
       console.error('Failed to load user profile:', error);
     }
@@ -409,6 +467,7 @@ const App: React.FC = () => {
 
   const handleLogout = async () => {
     try {
+      console.log('👋 User logging out');
       await authService.signOut();
       setUser(null);
       setSession(null);
@@ -416,6 +475,7 @@ const App: React.FC = () => {
       setIsLoggedIn(false);
       setShowAuthModal(true);
       trackingService.stopTracking();
+      console.log('✅ Logout successful');
     } catch (error) {
       console.error('Logout error:', error);
     }
@@ -517,45 +577,134 @@ const App: React.FC = () => {
   };
 
   // New handler for the Enhanced Event Modal
-  const handleEventSave = (eventData: EventFormData) => {
-    let newEvent: Event;
-    
-    if (editingEvent) {
-      // Update existing event
-      newEvent = convertFormDataToEvent(eventData, editingEvent.id);
+  const handleEventSave = async (eventData: EventFormData) => {
+    try {
+      if (isLoggedIn && user) {
+        // User is logged in - save to Supabase
+        if (editingEvent) {
+          // Update existing event in Supabase
+          const supabaseUpdate = {
+            title: eventData.title,
+            description: eventData.description,
+            start_time: eventData.startTime.toISOString(),
+            end_time: eventData.endTime.toISOString(),
+            location: eventData.location,
+            attendees: eventData.attendees,
+            is_recurring: eventData.isRecurring,
+            recurrence_rule: eventData.recurrenceRule
+          };
+          
+          await eventService.updateEvent(editingEvent.id, supabaseUpdate);
+          
+          // Update local state
+          const updatedLocalEvent = convertFormDataToEvent(eventData, editingEvent.id);
+          const eventsWithoutThis = events.filter(event => 
+            event.id !== editingEvent.id && event.parentEventId !== editingEvent.id
+          );
+          const updatedEvents = generateRecurringEvents(updatedLocalEvent);
+          
+          // Cancel existing reminders and schedule new ones
+          notificationService.cancelEventReminders(editingEvent.id);
+          updatedEvents.forEach(event => {
+            notificationService.scheduleEventReminder(event);
+          });
+          
+          setEvents([...eventsWithoutThis, ...updatedEvents]);
+        } else {
+          // Create new event in Supabase
+          const supabaseEvent = {
+            user_id: user.id,
+            title: eventData.title,
+            description: eventData.description,
+            start_time: eventData.startTime.toISOString(),
+            end_time: eventData.endTime.toISOString(),
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            location: eventData.location,
+            attendees: eventData.attendees,
+            is_recurring: eventData.isRecurring,
+            recurrence_rule: eventData.recurrenceRule
+          };
+          
+          console.log('💾 Creating event in Supabase for user:', user.id, supabaseEvent);
+          const createdEvent = await eventService.createEvent(supabaseEvent);
+          console.log('✅ Event created successfully:', createdEvent);
+          
+          // Convert to local format and add to state
+          const localEvent = {
+            id: createdEvent.id,
+            title: createdEvent.title,
+            description: createdEvent.description,
+            date: createdEvent.start_time.split('T')[0],
+            startTime: createdEvent.start_time.split('T')[1]?.substring(0, 5),
+            endTime: createdEvent.end_time.split('T')[1]?.substring(0, 5),
+            attendees: createdEvent.attendees,
+            category: 'personal' as Event['category'],
+            isRecurring: createdEvent.is_recurring,
+                         recurrenceRule: createdEvent.recurrence_rule ? {
+               frequency: createdEvent.recurrence_rule.includes('DAILY') ? 'daily' as const : 
+                         createdEvent.recurrence_rule.includes('WEEKLY') ? 'weekly' as const : 'monthly' as const
+             } : undefined,
+            parentEventId: createdEvent.parent_event_id || undefined
+          };
+          
+          const newEvents = generateRecurringEvents(localEvent);
+          
+          // Schedule notifications for new events
+          newEvents.forEach(event => {
+            notificationService.scheduleEventReminder(event);
+          });
+          
+          setEvents([...events, ...newEvents]);
+        }
+      } else {
+        // User not logged in - use original logic with localStorage
+        let newEvent: Event;
+        
+        if (editingEvent) {
+          // Update existing event
+          newEvent = convertFormDataToEvent(eventData, editingEvent.id);
+          
+          // Cancel existing reminders
+          notificationService.cancelEventReminders(editingEvent.id);
+          
+          // Remove existing event instances
+          const eventsWithoutThis = events.filter(event => 
+            event.id !== editingEvent.id && event.parentEventId !== editingEvent.id
+          );
+          
+          // Generate new event(s) based on updated settings
+          const updatedEvents = generateRecurringEvents(newEvent);
+          
+          // Schedule notifications for updated events
+          updatedEvents.forEach(event => {
+            notificationService.scheduleEventReminder(event);
+          });
+          
+          setEvents([...eventsWithoutThis, ...updatedEvents]);
+        } else {
+          // Create new event
+          newEvent = convertFormDataToEvent(eventData);
+          const newEvents = generateRecurringEvents(newEvent);
+          
+          // Schedule notifications for new events
+          newEvents.forEach(event => {
+            notificationService.scheduleEventReminder(event);
+          });
+          
+          setEvents([...events, ...newEvents]);
+        }
+      }
       
-      // Cancel existing reminders
-      notificationService.cancelEventReminders(editingEvent.id);
-      
-      // Remove existing event instances
-      const eventsWithoutThis = events.filter(event => 
-        event.id !== editingEvent.id && event.parentEventId !== editingEvent.id
+      setShowEventModal(false);
+      setEditingEvent(null);
+    } catch (error) {
+      console.error('Failed to save event:', error);
+      notificationService.showNotification(
+        '❌ Error',
+        'Failed to save event. Please try again.',
+        { type: 'system' }
       );
-      
-      // Generate new event(s) based on updated settings
-      const updatedEvents = generateRecurringEvents(newEvent);
-      
-      // Schedule notifications for updated events
-      updatedEvents.forEach(event => {
-        notificationService.scheduleEventReminder(event);
-      });
-      
-      setEvents([...eventsWithoutThis, ...updatedEvents]);
-    } else {
-      // Create new event
-      newEvent = convertFormDataToEvent(eventData);
-      const newEvents = generateRecurringEvents(newEvent);
-      
-      // Schedule notifications for new events
-      newEvents.forEach(event => {
-        notificationService.scheduleEventReminder(event);
-      });
-      
-      setEvents([...events, ...newEvents]);
     }
-    
-    setShowEventModal(false);
-    setEditingEvent(null);
   };
 
   const handleCreateOrUpdateEvent = (e: React.FormEvent) => {
@@ -617,17 +766,32 @@ const App: React.FC = () => {
     setEditingEvent(null);
   };
 
-  const handleDeleteEvent = (eventId: string) => {
+  const handleDeleteEvent = async (eventId: string) => {
     if (confirm('Are you sure you want to delete this event?')) {
-      // Cancel notifications for this event
-      notificationService.cancelEventReminders(eventId);
-      
-      const updatedEvents = events.filter(event => 
-        event.id !== eventId && event.parentEventId !== eventId
-      );
-      setEvents(updatedEvents);
-      setShowEventModal(false);
-      setEditingEvent(null);
+      try {
+        // Cancel notifications for this event
+        notificationService.cancelEventReminders(eventId);
+        
+        if (isLoggedIn && user) {
+          // Delete from Supabase
+          await eventService.deleteEvent(eventId);
+        }
+        
+        // Update local state
+        const updatedEvents = events.filter(event => 
+          event.id !== eventId && event.parentEventId !== eventId
+        );
+        setEvents(updatedEvents);
+        setShowEventModal(false);
+        setEditingEvent(null);
+      } catch (error) {
+        console.error('Failed to delete event:', error);
+        notificationService.showNotification(
+          '❌ Error',
+          'Failed to delete event. Please try again.',
+          { type: 'system' }
+        );
+      }
     }
   };
 
@@ -658,47 +822,121 @@ const App: React.FC = () => {
     return filteredEvents.filter(event => event.date >= start && event.date <= end);
   };
 
-  // Gmail Integration Functions
+  // Gmail & Google Calendar Integration Functions
   const handleGmailConnect = async () => {
     try {
+      console.log('🔗 Initiating Google Calendar connection...');
       const success = await gmailService.authenticate();
       if (success) {
         setGmailConnected(true);
         notificationService.showNotification(
-          '📧 Gmail Connected',
-          'Successfully connected to Gmail! You can now import events from emails.',
+          '📅 Google Calendar Connected',
+          'Successfully connected to Google Calendar! You can now sync events.',
           { type: 'system' }
         );
+        
+        // Automatically sync after connection
+        await handleSyncWithGoogleCalendar();
       }
     } catch (error) {
-      console.error('Gmail connection failed:', error);
+      console.error('Google Calendar connection failed:', error);
       notificationService.showNotification(
-        '❌ Gmail Connection Failed',
-        'Failed to connect to Gmail. Please try again.',
+        '❌ Connection Failed',
+        'Failed to connect to Google Calendar. Please try again.',
         { type: 'system' }
       );
     }
   };
 
   const handleGmailDisconnect = () => {
+    console.log('🔌 Disconnecting from Google Calendar...');
     gmailService.clearStoredTokens();
     setGmailConnected(false);
     setGmailEmails([]);
+    
     notificationService.showNotification(
-      '📧 Gmail Disconnected',
-      'Gmail has been disconnected from FlowGenius.',
+      '📅 Google Calendar Disconnected',
+      'Google Calendar has been disconnected from FlowGenius.',
       { type: 'system' }
     );
   };
 
-  const handleImportFromGmail = async () => {
+  // New: Two-way sync with Google Calendar
+  const handleSyncWithGoogleCalendar = async () => {
     if (!gmailConnected) {
-      alert('Please connect Gmail first');
+      notificationService.showNotification(
+        '❌ Not Connected',
+        'Please connect to Google Calendar first.',
+        { type: 'system' }
+      );
       return;
     }
 
     setLoadingEmails(true);
     try {
+      console.log('🔄 Starting Google Calendar sync...');
+      
+      // Get current local events (excluding Google Calendar events to avoid duplicates)
+      const currentEvents = events.filter(event => event.source !== 'google_calendar');
+      
+      // Perform two-way sync
+      const syncResult = await gmailService.syncWithGoogleCalendar(currentEvents);
+      
+      // Merge downloaded events with existing local events
+      const mergedEvents = [
+        ...currentEvents, // Keep local events
+        ...syncResult.downloaded // Add downloaded Google Calendar events
+      ];
+      
+      // Remove duplicates based on title and date
+      const uniqueEvents = mergedEvents.filter((event, index, self) => 
+        index === self.findIndex(e => 
+          e.title === event.title && 
+          e.date === event.date && 
+          e.startTime === event.startTime
+        )
+      );
+      
+      setEvents(uniqueEvents);
+      setFilteredEvents(uniqueEvents);
+      
+      // Schedule notifications for new events
+      syncResult.downloaded.forEach(event => {
+        notificationService.scheduleEventReminder(event);
+      });
+      
+      notificationService.showNotification(
+        '✅ Sync Complete',
+        `Downloaded ${syncResult.downloaded.length} events, uploaded ${syncResult.uploaded.length} events.`,
+        { type: 'system' }
+      );
+      
+      console.log('✅ Google Calendar sync completed successfully');
+    } catch (error) {
+      console.error('❌ Google Calendar sync failed:', error);
+      notificationService.showNotification(
+        '❌ Sync Failed',
+        'Failed to sync with Google Calendar. Please try again.',
+        { type: 'system' }
+      );
+    }
+    setLoadingEmails(false);
+  };
+
+  // Legacy: Import from Gmail emails (keeping for backward compatibility)
+  const handleImportFromGmail = async () => {
+    if (!gmailConnected) {
+      notificationService.showNotification(
+        '❌ Not Connected',
+        'Please connect to Google Calendar first.',
+        { type: 'system' }
+      );
+      return;
+    }
+
+    setLoadingEmails(true);
+    try {
+      console.log('📧 Importing events from Gmail emails...');
       const emails = await gmailService.getRecentEmails(10);
       setGmailEmails(emails);
       
@@ -723,8 +961,8 @@ const App: React.FC = () => {
 
         setEvents(prev => [...prev, ...newEvents]);
         notificationService.showNotification(
-          '📅 Events Imported',
-          `Successfully imported ${totalEventsImported} events from Gmail!`,
+          '📧 Email Events Imported',
+          `Successfully imported ${totalEventsImported} events from Gmail emails!`,
           { type: 'system' }
         );
       } else {
@@ -735,10 +973,10 @@ const App: React.FC = () => {
         );
       }
     } catch (error) {
-      console.error('Failed to import from Gmail:', error);
+      console.error('Failed to import from Gmail emails:', error);
       notificationService.showNotification(
         '❌ Import Failed',
-        'Failed to import events from Gmail.',
+        'Failed to import events from Gmail emails.',
         { type: 'system' }
       );
     }
@@ -748,6 +986,7 @@ const App: React.FC = () => {
   // Notification Settings Functions
   const handleNotificationSettingsUpdate = (newSettings: any) => {
     notificationService.updateSettings(newSettings);
+    setNotificationSettings(notificationService.getSettings()); // Update local state
     notificationService.showNotification(
       '⚙️ Settings Updated',
       'Notification settings have been saved.',
@@ -1738,9 +1977,9 @@ const App: React.FC = () => {
                 title: event.title,
                 description: event.description || '',
                 start_time: event.date && event.startTime ? 
-                  `${event.date}T${event.startTime}:00` : new Date().toISOString(),
+                  `${event.date}T${event.startTime}:00.000Z` : new Date().toISOString(),
                 end_time: event.date && event.endTime ? 
-                  `${event.date}T${event.endTime}:00` : new Date().toISOString(),
+                  `${event.date}T${event.endTime}:00.000Z` : new Date().toISOString(),
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                 location: '',
                 attendees: event.attendees || [],
@@ -1767,7 +2006,7 @@ const App: React.FC = () => {
                       <label style={styles.modalCheckbox}>
                         <input
                           type="checkbox"
-                          checked={notificationService.getSettings().eventReminders}
+                          checked={notificationSettings.eventReminders}
                           onChange={(e) => handleNotificationSettingsUpdate({ eventReminders: e.target.checked })}
                         />
                         Enable event reminders
@@ -1776,7 +2015,7 @@ const App: React.FC = () => {
                       <label style={styles.modalCheckbox}>
                         <input
                           type="checkbox"
-                          checked={notificationService.getSettings().soundEnabled}
+                          checked={notificationSettings.soundEnabled}
                           onChange={(e) => handleNotificationSettingsUpdate({ soundEnabled: e.target.checked })}
                         />
                         Enable notification sounds
@@ -1785,7 +2024,7 @@ const App: React.FC = () => {
                       <label style={styles.modalCheckbox}>
                         <input
                           type="checkbox"
-                          checked={notificationService.getSettings().productivityInsights}
+                          checked={notificationSettings.productivityInsights}
                           onChange={(e) => handleNotificationSettingsUpdate({ productivityInsights: e.target.checked })}
                         />
                         Enable productivity insights
@@ -1817,49 +2056,76 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* Gmail Integration Modal */}
+            {/* Google Calendar Integration Modal */}
             {showGmailIntegration && (
               <div style={styles.modalOverlay} onClick={() => setShowGmailIntegration(false)}>
                 <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
                   <div style={styles.modalHeader}>
-                    <span>📧 Gmail Integration</span>
+                    <span>📅 Google Calendar Integration</span>
                   </div>
                   
                   <div style={styles.modalForm}>
                     <div style={styles.settingsSection}>
                       <h4>Connection Status</h4>
                       <p style={{ color: gmailConnected ? '#4caf50' : '#f44336', fontWeight: 'bold' }}>
-                        {gmailConnected ? '✅ Connected to Gmail' : '❌ Not Connected'}
+                        {gmailConnected ? '✅ Connected to Google Calendar' : '❌ Not Connected'}
                       </p>
                       
                       {!gmailConnected ? (
                         <div>
-                          <p>Connect Gmail to automatically import calendar events from your emails.</p>
+                          <p>Connect Google Calendar to sync events between FlowGenius and your Google Calendar.</p>
                           <button 
                             style={{...styles.modalButton, ...styles.primaryButton}}
                             onClick={handleGmailConnect}
                           >
-                            Connect Gmail
+                            Connect Google Calendar
                           </button>
                         </div>
                       ) : (
-                        <div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                           <button 
                             style={{...styles.modalButton, ...styles.primaryButton}}
+                            onClick={handleSyncWithGoogleCalendar}
+                            disabled={loadingEmails}
+                          >
+                            {loadingEmails ? 'Syncing...' : '🔄 Sync with Google Calendar'}
+                          </button>
+                          <button 
+                            style={{...styles.modalButton, ...styles.secondaryButton}}
                             onClick={handleImportFromGmail}
                             disabled={loadingEmails}
                           >
-                            {loadingEmails ? 'Importing...' : 'Import Recent Events'}
+                            {loadingEmails ? 'Importing...' : '📧 Import from Gmail Emails'}
                           </button>
                           <button 
                             style={{...styles.modalButton, ...styles.dangerButton}}
                             onClick={handleGmailDisconnect}
                           >
-                            Disconnect Gmail
+                            Disconnect
                           </button>
                         </div>
                       )}
                     </div>
+
+                    {gmailConnected && (
+                      <div style={styles.settingsSection}>
+                        <h4>How it Works</h4>
+                        <div style={{ color: '#666', fontSize: '14px' }}>
+                          <p><strong>Two-Way Sync:</strong></p>
+                          <ul style={{ marginLeft: '20px' }}>
+                            <li>Downloads events from your Google Calendar</li>
+                            <li>Uploads FlowGenius events to Google Calendar</li>
+                            <li>Keeps both calendars in sync</li>
+                          </ul>
+                          <p><strong>Email Import:</strong></p>
+                          <ul style={{ marginLeft: '20px' }}>
+                            <li>Scans recent Gmail emails</li>
+                            <li>Extracts meeting times and appointments</li>
+                            <li>Creates calendar events automatically</li>
+                          </ul>
+                        </div>
+                      </div>
+                    )}
 
                     {gmailEmails.length > 0 && (
                       <div style={styles.settingsSection}>
