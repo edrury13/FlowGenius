@@ -1,6 +1,8 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
+import * as http from 'http';
+import * as url from 'url';
 import windowsAppTracker from './tracking';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -222,13 +224,13 @@ const createTray = (): void => {
       if (trayIcon.isEmpty()) {
         console.warn('⚠️ Tray icon is empty, using fallback');
         // Create a simple icon as fallback
-        trayIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAdgAAAHYBTnsmCAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAFZSURBVDiNpZM9SwNBEIafgwQSCxsLwcJCG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1s');
+        trayIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAdgAAAHYBTnsmCAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAFZSURBVDiNpZM9SwNBEIafgwQSCxsLwcJCG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1s');
       }
       console.log('✅ Tray icon loaded successfully');
     } catch (error) {
       console.error('❌ Failed to load tray icon:', error);
       // Fallback to a simple icon if custom icon not found
-      trayIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAdgAAAHYBTnsmCAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAFZSURBVDiNpZM9SwNBEIafgwQSCxsLwcJCG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1s');
+      trayIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAdgAAAHYBTnsmCAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAFZSURBVDiNpZM9SwNBEIafgwQSCxsLwcJCG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1s');
     }
   } else {
     // No icon path found, create fallback icon
@@ -637,6 +639,285 @@ ipcMain.handle('get-app-info', async () => {
       'Ctrl+Shift+T: View today\'s events'
     ]
   };
+});
+
+// Handle opening external URLs (for OAuth)
+ipcMain.handle('open-external-url', async (_event, url: string) => {
+  try {
+    await shell.openExternal(url);
+  } catch (error) {
+    console.error('Failed to open external URL:', error);
+    throw error;
+  }
+});
+
+// Handle Google OAuth flow with actual HTTP server
+ipcMain.handle('start-google-oauth', async () => {
+  return new Promise<string>((resolve, reject) => {
+    console.log('🚀 Starting Google OAuth flow...');
+    console.log('🔍 DEBUG: Current working directory:', process.cwd());
+    console.log('🔍 DEBUG: Process platform:', process.platform);
+    
+    let authCodeCaptured = false;
+    let server: any = null;
+    
+    // Import http module
+    const http = require('http');
+    
+    // Create HTTP server to handle OAuth callback
+    const createServer = (port: number): Promise<any> => {
+      return new Promise((serverResolve, serverReject) => {
+        console.log(`🔍 DEBUG: Attempting to create server on port ${port}`);
+        
+        const srv = http.createServer((req: any, res: any) => {
+          const url = req.url;
+          console.log('📨 OAuth callback received:', url);
+          console.log('📨 Request headers:', req.headers);
+          console.log('📨 Request method:', req.method);
+          
+          if (url.startsWith('/auth/google/callback')) {
+            if (authCodeCaptured) {
+              console.log('⚠️  Auth code already captured, ignoring duplicate request');
+              res.writeHead(200, {'Content-Type': 'text/html'});
+              res.end('Already processed');
+              return;
+            }
+            
+            try {
+              const urlParams = new URLSearchParams(url.split('?')[1]);
+              const authCode = urlParams.get('code');
+              const error = urlParams.get('error');
+              
+              console.log('🔍 DEBUG: URL params:', Object.fromEntries(urlParams.entries()));
+              
+              if (error) {
+                console.error('❌ OAuth error:', error);
+                res.writeHead(200, {'Content-Type': 'text/html'});
+                res.end(`
+                  <!DOCTYPE html>
+                  <html>
+                    <head><title>OAuth Error</title></head>
+                    <body>
+                      <h1>❌ OAuth Error</h1>
+                      <p>Error: ${error}</p>
+                      <p>You can close this window.</p>
+                    </body>
+                  </html>
+                `);
+                server.close();
+                reject(new Error(`OAuth failed: ${error}`));
+                return;
+              }
+              
+              if (authCode) {
+                console.log('✅ Authorization code received:', authCode.substring(0, 20) + '...');
+                authCodeCaptured = true;
+                
+                res.writeHead(200, {'Content-Type': 'text/html'});
+                res.end(`
+                  <!DOCTYPE html>
+                  <html>
+                    <head><title>OAuth Success</title></head>
+                    <body>
+                      <h1>✅ Authorization successful!</h1>
+                      <p>You can close this window and return to FlowGenius.</p>
+                      <script>
+                        setTimeout(() => {
+                          window.close();
+                        }, 3000);
+                      </script>
+                    </body>
+                  </html>
+                `);
+                
+                setTimeout(() => {
+                  server.close();
+                }, 2000);
+                
+                                  resolve(authCode);
+              } else {
+                console.error('❌ No authorization code in callback');
+                res.writeHead(400, {'Content-Type': 'text/html'});
+                res.end(`
+                  <!DOCTYPE html>
+                  <html>
+                    <head><title>OAuth Error</title></head>
+                    <body>
+                      <h1>❌ No authorization code received</h1>
+                      <p>You can close this window.</p>
+                    </body>
+                  </html>
+                `);
+                server.close();
+                reject(new Error('No authorization code received'));
+              }
+            } catch (parseError) {
+              console.error('❌ Error parsing OAuth callback:', parseError);
+              res.writeHead(500, {'Content-Type': 'text/html'});
+              res.end(`
+                <!DOCTYPE html>
+                <html>
+                  <head><title>OAuth Error</title></head>
+                  <body>
+                    <h1>❌ Error processing callback</h1>
+                    <p>Error: ${parseError}</p>
+                    <p>You can close this window.</p>
+                  </body>
+                </html>
+              `);
+              server.close();
+              reject(parseError);
+            }
+          } else {
+            console.log('📨 Non-OAuth request received:', url);
+            res.writeHead(200, {'Content-Type': 'text/html'});
+            res.end(`
+              <!DOCTYPE html>
+              <html>
+                <head><title>OAuth Server</title></head>
+                <body>
+                  <h1>OAuth Server Running</h1>
+                  <p>Waiting for Google OAuth callback...</p>
+                </body>
+              </html>
+            `);
+          }
+        });
+        
+        srv.on('error', (error: any) => {
+          console.error(`❌ Server error on port ${port}:`, error.message);
+          if (error.code === 'EADDRINUSE') {
+            console.log(`⚠️  Port ${port} is in use, will try next port`);
+            serverReject(error);
+          } else {
+            serverReject(error);
+          }
+        });
+        
+        srv.on('listening', () => {
+          console.log(`✅ OAuth server successfully listening on port ${port}`);
+          console.log(`🔍 DEBUG: Server address:`, srv.address());
+          serverResolve(srv);
+        });
+        
+        srv.listen(port, () => {
+          console.log(`🔄 OAuth server attempting to bind to port ${port} (all interfaces)`);
+        });
+      });
+    };
+    
+    // Try to create server on ports 3000, 3001, 3002, etc.
+    const tryPorts = async (startPort: number = 3000): Promise<any> => {
+      for (let port = startPort; port < startPort + 10; port++) {
+        try {
+          console.log(`🔍 DEBUG: Trying port ${port}...`);
+          const srv = await createServer(port);
+          console.log(`✅ Server created successfully on port ${port}`);
+          return { server: srv, port };
+        } catch (error: any) {
+          console.log(`❌ Port ${port} failed:`, error.message);
+          if (error.code !== 'EADDRINUSE') {
+            throw error;
+          }
+        }
+      }
+      throw new Error('No available ports found');
+    };
+    
+    // Start the server
+    tryPorts().then(({ server: srv, port }) => {
+      server = srv;
+      console.log(`🎯 OAuth server ready on port ${port}`);
+      
+      // Build the Google OAuth URL
+      const clientId = '1001911230665-9qn1se3g00mn17p5vd0h2lt5kti2l1b9.apps.googleusercontent.com';
+      const redirectUri = `http://localhost:${port}/auth/google/callback`;
+      const scopes = [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/calendar',
+        'https://www.googleapis.com/auth/calendar.events'
+      ];
+      
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `access_type=offline&` +
+        `scope=${encodeURIComponent(scopes.join(' '))}&` +
+        `response_type=code&` +
+        `client_id=${encodeURIComponent(clientId)}&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `prompt=consent`;
+      
+      console.log('🔗 OAuth URL:', authUrl);
+      console.log('🎯 Redirect URI:', redirectUri);
+      
+      // Create a new browser window for OAuth
+      const authWindow = new BrowserWindow({
+        width: 600,
+        height: 700,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+        },
+        title: 'Connect to Google',
+        autoHideMenuBar: true,
+      });
+      
+      // Load the OAuth URL
+      console.log('🌐 Opening OAuth window...');
+      authWindow.loadURL(authUrl);
+      
+      // The cleanup will be handled in the timeout and window close events
+      
+      // Set timeout for the entire process
+      const timeout = setTimeout(() => {
+        console.log('⏰ OAuth flow timed out after 5 minutes');
+        if (!authWindow.isDestroyed()) {
+          authWindow.close();
+        }
+        if (server) {
+          server.close();
+        }
+        reject(new Error('OAuth flow timed out'));
+      }, 300000); // 5 minutes
+      
+      // Handle window close
+      authWindow.on('closed', () => {
+        console.log('🚪 OAuth window closed');
+        if (!authCodeCaptured) {
+          clearTimeout(timeout);
+          if (server) {
+            server.close();
+          }
+          reject(new Error('OAuth window closed by user'));
+        }
+      });
+      
+      // Handle successful resolution with proper cleanup
+      const cleanupAndResolve = (value: string) => {
+        console.log('✅ OAuth flow completed successfully');
+        clearTimeout(timeout);
+        if (!authWindow.isDestroyed()) {
+          authWindow.close();
+        }
+        resolve(value);
+      };
+      
+      const cleanupAndReject = (reason: any) => {
+        console.log('❌ OAuth flow failed:', reason);
+        clearTimeout(timeout);
+        if (!authWindow.isDestroyed()) {
+          authWindow.close();
+        }
+        if (server) {
+          server.close();
+        }
+        reject(reason);
+      };
+      
+    }).catch((error) => {
+      console.error('❌ Failed to start OAuth server:', error);
+      reject(error);
+    });
+  });
 });
 
  

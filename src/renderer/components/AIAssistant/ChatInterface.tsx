@@ -38,7 +38,7 @@ import { EventFormData } from '../../types';
 
 interface ChatInterfaceProps {
   events: Event[];
-  onEventCreate: (eventData: EventFormData) => void;
+  onEventCreate: (eventData: EventFormData) => Promise<void>;
   onClose?: () => void;
   className?: string;
 }
@@ -115,7 +115,7 @@ What would you like to schedule?`,
     }
   };
 
-  const handleCreateEvent = (eventData: Partial<EventFormData>, suggestion: EventSuggestion) => {
+  const handleCreateEvent = async (eventData: Partial<EventFormData>, suggestion: EventSuggestion) => {
     if (eventData.title && eventData.startTime && eventData.endTime) {
       const fullEventData: EventFormData = {
         title: eventData.title,
@@ -128,20 +128,32 @@ What would you like to schedule?`,
         recurrenceRule: eventData.recurrenceRule
       };
       
-      onEventCreate(fullEventData);
+      try {
+        await onEventCreate(fullEventData);
 
-      // Add confirmation message
-      const confirmMessage: ChatMessage = {
-        id: `confirm_${Date.now()}`,
-        type: 'assistant',
-        content: `✅ Great! I've created "${eventData.title}" for ${eventData.startTime.toLocaleString()}. The event has been added to your calendar!`,
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, confirmMessage]);
+        // Add confirmation message
+        const confirmMessage: ChatMessage = {
+          id: `confirm_${Date.now()}`,
+          type: 'assistant',
+          content: `✅ Great! I've created "${eventData.title}" for ${eventData.startTime.toLocaleString()}. The event has been added to your calendar!`,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, confirmMessage]);
+      } catch (error) {
+        console.error('Failed to create event:', error);
+        // Add error message
+        const errorMessage: ChatMessage = {
+          id: `error_${Date.now()}`,
+          type: 'assistant',
+          content: `❌ Sorry, I couldn't create the event "${eventData.title}". Please try again.`,
+          timestamp: new Date()
+        };
+        setMessages(prev => [...prev, errorMessage]);
+      }
     }
   };
 
-  const handleUseTimeSlot = (suggestion: EventSuggestion, timeSlot: any) => {
+  const handleUseTimeSlot = async (suggestion: EventSuggestion, timeSlot: any) => {
     const eventData: Partial<EventFormData> = {
       title: suggestion.title,
       description: suggestion.description,
@@ -152,7 +164,7 @@ What would you like to schedule?`,
       isRecurring: false
     };
     
-    handleCreateEvent(eventData, suggestion);
+    await handleCreateEvent(eventData, suggestion);
   };
 
   const formatTimeSlot = (timeSlot: any) => {
@@ -271,6 +283,73 @@ What would you like to schedule?`,
                         </Box>
                       )}
                     </Box>
+
+                    {/* Location Suggestions */}
+                    {suggestion.locationSuggestions && suggestion.locationSuggestions.length > 0 && (
+                      <Box sx={{ mb: 3 }}>
+                        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
+                          📍 Suggested Locations
+                        </Typography>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          {suggestion.locationSuggestions.slice(0, 3).map((location, locIndex) => (
+                            <Box
+                              key={locIndex}
+                              sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                p: 1.5,
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                borderRadius: 2,
+                                backgroundColor: 'background.paper',
+                                '&:hover': {
+                                  backgroundColor: 'action.hover',
+                                  borderColor: 'primary.main'
+                                }
+                              }}
+                            >
+                              <Box sx={{ flex: 1 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                  {location.name}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {location.address}
+                                </Typography>
+                              </Box>
+                              <Box sx={{ display: 'flex', gap: 1 }}>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  startIcon={<LocationIcon />}
+                                  onClick={() => {
+                                    // Add location to event (this would need to be implemented)
+                                    console.log('Add location to event:', location);
+                                  }}
+                                  sx={{ textTransform: 'none' }}
+                                >
+                                  Add
+                                </Button>
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  startIcon={<LocationIcon />}
+                                  onClick={() => {
+                                    const googleMapsUrl = location.placeId 
+                                      ? `https://www.google.com/maps/place/?q=place_id:${location.placeId}`
+                                      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location.name + ' ' + (location.address || ''))}`;
+                                    window.open(googleMapsUrl, '_blank');
+                                  }}
+                                  sx={{ textTransform: 'none' }}
+                                >
+                                  View
+                                </Button>
+                              </Box>
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    )}
 
                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       {suggestion.suggestedTimes.slice(0, 3).map((timeSlot, index) => (

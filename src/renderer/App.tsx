@@ -1035,21 +1035,80 @@ const App: React.FC = () => {
     dispatch(toggleVisibility());
   };
 
-  const handleAIEventCreate = (eventData: EventFormData) => {
-    // Convert EventFormData to Event and add to calendar
-    const newEvent = convertFormDataToEvent(eventData);
-    const updatedEvents = [...events, newEvent];
-    setEvents(updatedEvents);
-    setFilteredEvents(updatedEvents);
-    localStorage.setItem('flowgenius-events', JSON.stringify(updatedEvents));
+  const handleAIEventCreate = async (eventData: EventFormData) => {
+    try {
+      if (isLoggedIn && user) {
+        // User is logged in - save to Supabase (same logic as handleEventSave)
+        const supabaseEvent = {
+          user_id: user.id,
+          title: eventData.title,
+          description: eventData.description,
+          start_time: eventData.startTime.toISOString(),
+          end_time: eventData.endTime.toISOString(),
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          location: eventData.location,
+          attendees: eventData.attendees,
+          is_recurring: eventData.isRecurring,
+          recurrence_rule: eventData.recurrenceRule
+        };
+        
+        console.log('💾 Creating AI event in Supabase for user:', user.id, supabaseEvent);
+        const createdEvent = await eventService.createEvent(supabaseEvent);
+        console.log('✅ AI Event created successfully:', createdEvent);
+        
+        // Convert to local format and add to state
+        const localEvent = {
+          id: createdEvent.id,
+          title: createdEvent.title,
+          description: createdEvent.description,
+          date: createdEvent.start_time.split('T')[0],
+          startTime: createdEvent.start_time.split('T')[1]?.substring(0, 5),
+          endTime: createdEvent.end_time.split('T')[1]?.substring(0, 5),
+          attendees: createdEvent.attendees,
+          category: 'personal' as Event['category'],
+          isRecurring: createdEvent.is_recurring,
+          recurrenceRule: createdEvent.recurrence_rule ? {
+            frequency: createdEvent.recurrence_rule.includes('DAILY') ? 'daily' as const : 
+                      createdEvent.recurrence_rule.includes('WEEKLY') ? 'weekly' as const : 'monthly' as const
+          } : undefined,
+          parentEventId: createdEvent.parent_event_id || undefined
+        };
+        
+        const newEvents = generateRecurringEvents(localEvent);
+        setEvents([...events, ...newEvents]);
+        setFilteredEvents([...events, ...newEvents]);
+        
+        // Schedule notifications for new events
+        newEvents.forEach(event => {
+          notificationService.scheduleEventReminder(event);
+        });
+      } else {
+        // User not logged in - save to localStorage (original logic)
+        const newEvent = convertFormDataToEvent(eventData);
+        const updatedEvents = [...events, newEvent];
+        setEvents(updatedEvents);
+        setFilteredEvents(updatedEvents);
+        localStorage.setItem('flowgenius-events', JSON.stringify(updatedEvents));
+        
+        // Schedule notification for new event
+        notificationService.scheduleEventReminder(newEvent);
+      }
 
-    // Record successful scheduling for AI learning
-    dispatch(recordSuccessfulScheduling({
-      eventType: newEvent.category,
-      suggestedLocation: eventData.location || '',
-      suggestedAttendees: eventData.attendees || [],
-      timeSlotUsed: 0 // Could be enhanced to track which time slot was actually used
-    }));
+      // Record successful scheduling for AI learning
+      dispatch(recordSuccessfulScheduling({
+        eventType: 'personal', // Default event type since EventFormData doesn't have category
+        suggestedLocation: eventData.location || '',
+        suggestedAttendees: eventData.attendees || [],
+        timeSlotUsed: 0 // Could be enhanced to track which time slot was actually used
+      }));
+    } catch (error) {
+      console.error('Failed to create AI event:', error);
+      notificationService.showNotification(
+        '❌ Error',
+        'Failed to create event. Please try again.',
+        { type: 'system' }
+      );
+    }
   };
 
   // Convert events to the format expected by AI Assistant

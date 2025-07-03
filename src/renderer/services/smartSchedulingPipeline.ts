@@ -654,10 +654,10 @@ class SmartSchedulingPipeline {
       suggestions.push(...topDaySlots);
     }
 
-    // Return top 8 suggestions (increased from 5)
+    // Return top 5 suggestions
     return suggestions
       .sort((a, b) => b.priority - a.priority)
-      .slice(0, 8);
+      .slice(0, 5);
   }
 
   /**

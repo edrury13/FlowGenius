@@ -30,7 +30,9 @@ import {
   AutoFixHigh,
   ExpandMore,
   LocationOn,
-  Check
+  Check,
+  OpenInNew,
+  Map
 } from '@mui/icons-material';
 import { Event } from '../../services/supabase';
 import smartSchedulingPipeline, {
@@ -365,9 +367,9 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                                     Suggested Locations:
                                   </Typography>
                                 </Box>
-                                <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                                <Stack spacing={0.5}>
                                   {suggestion.locationSuggestions.slice(0, 2).map((location, locIndex) => (
-                                    <Tooltip key={locIndex} title="Click to add this location to the event">
+                                    <Box key={locIndex} display="flex" alignItems="center" gap={0.5}>
                                       <Chip
                                         label={location.name}
                                         size="small"
@@ -389,7 +391,28 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                                           }
                                         }}
                                       />
-                                    </Tooltip>
+                                      <Tooltip title="View in Google Maps">
+                                        <IconButton
+                                          size="small"
+                                          sx={{ 
+                                            color: 'primary.main',
+                                            '&:hover': {
+                                              backgroundColor: 'primary.main',
+                                              color: 'primary.contrastText',
+                                            }
+                                          }}
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const googleMapsUrl = location.placeId 
+                                              ? `https://www.google.com/maps/place/?q=place_id:${location.placeId}`
+                                              : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location.name + ' ' + (location.address || ''))}`;
+                                            window.open(googleMapsUrl, '_blank');
+                                          }}
+                                        >
+                                          <OpenInNew fontSize="small" />
+                                        </IconButton>
+                                      </Tooltip>
+                                    </Box>
                                   ))}
                                 </Stack>
                               </Box>

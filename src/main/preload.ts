@@ -38,6 +38,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateUpcomingEvents: (events: any[]) => 
     ipcRenderer.send('update-upcoming-events', events),
   
+  // OAuth handling
+  openExternalUrl: (url: string) => ipcRenderer.invoke('open-external-url', url),
+  
+  // Google OAuth flow
+  startGoogleOAuth: () => ipcRenderer.invoke('start-google-oauth'),
+  
   // Remove listeners
   removeAllListeners: (channel: string) => 
     ipcRenderer.removeAllListeners(channel),
@@ -67,6 +73,8 @@ declare global {
         shortcuts: string[];
       }>;
       updateUpcomingEvents: (events: any[]) => void;
+      openExternalUrl: (url: string) => Promise<void>;
+      startGoogleOAuth: () => Promise<string>;
       removeAllListeners: (channel: string) => void;
     };
   }

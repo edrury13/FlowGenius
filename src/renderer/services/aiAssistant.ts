@@ -1,8 +1,9 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages';
 import { Event } from './supabase';
-import { EventFormData } from '../types';
+import { EventFormData, EventLocation } from '../types';
 import { TimeSlotSuggestion, EventClassification } from '../types/smartScheduling';
+import { locationService } from './location';
 
 export interface ChatMessage {
   id: string;
@@ -19,6 +20,7 @@ export interface EventSuggestion {
   description: string;
   suggestedTimes: TimeSlotSuggestion[];
   suggestedLocation?: string;
+  locationSuggestions?: EventLocation[];
   suggestedInvitees?: string[];
   confidence: number;
   reasoning: string;
@@ -90,7 +92,7 @@ export class AIAssistantService {
       if (this.llm) {
         return await this.processWithLLM(userMessage, existingEvents);
       } else {
-        return this.processWithFallback(userMessage, existingEvents);
+        return await this.processWithFallback(userMessage, existingEvents);
       }
     } catch (error) {
       console.error('Error processing AI message:', error);
@@ -132,10 +134,13 @@ export class AIAssistantService {
   /**
    * Fallback processing without LLM
    */
-  private processWithFallback(userMessage: string, existingEvents: Event[]): ChatMessage {
+  private async processWithFallback(userMessage: string, existingEvents: Event[]): Promise<ChatMessage> {
     const keywords = this.extractKeywords(userMessage.toLowerCase());
     const eventType = this.inferEventType(keywords);
     const timeInfo = this.extractTimeInfo(userMessage);
+    
+    // Generate location suggestions using the location service
+    const locationSuggestions = await this.generateLocationSuggestions(userMessage, eventType);
     
     const suggestion: EventSuggestion = {
       id: this.generateId(),
@@ -143,6 +148,7 @@ export class AIAssistantService {
       description: `Based on your message: "${userMessage}"`,
       suggestedTimes: this.suggestTimes(timeInfo, existingEvents),
       suggestedLocation: this.suggestLocation(eventType, keywords),
+      locationSuggestions,
       suggestedInvitees: this.suggestInvitees(keywords, existingEvents),
       confidence: 0.7,
       reasoning: 'Generated using pattern matching and keyword analysis'
@@ -218,12 +224,16 @@ Respond naturally and conversationally. The system will automatically suggest ap
     const timeInfo = this.extractTimeInfo(originalMessage);
     const suggestedTimes = this.suggestTimes(timeInfo, existingEvents);
 
+    // Generate location suggestions using the location service
+    const locationSuggestions = await this.generateLocationSuggestions(originalMessage, eventType);
+
     return {
       id: this.generateId(),
       title: this.suggestTitle(keywords, eventType),
       description: aiResponse,
       suggestedTimes,
       suggestedLocation: this.suggestLocation(eventType, keywords),
+      locationSuggestions,
       suggestedInvitees: this.suggestInvitees(keywords, existingEvents),
       confidence: 0.85,
       reasoning: 'Generated using AI analysis and smart scheduling'
@@ -492,6 +502,88 @@ Respond naturally and conversationally. The system will automatically suggest ap
 
     // Default fallback
     return 'TBD';
+  }
+
+  /**
+   * Generate location suggestions using the location service
+   */
+  private async generateLocationSuggestions(message: string, eventType: 'business' | 'hobby'): Promise<EventLocation[]> {
+    try {
+      // Get user's current location
+      const userLocation = await this.getUserLocation();
+      
+      // Determine event type based on message and classification
+      let locationType = 'meeting';
+      const lowerMessage = message.toLowerCase();
+      
+      // More specific event type detection
+      if (lowerMessage.includes('breakfast') || lowerMessage.includes('brunch') || 
+          lowerMessage.includes('lunch') || lowerMessage.includes('dinner') || 
+          lowerMessage.includes('meal') || lowerMessage.includes('dining')) {
+        locationType = 'restaurant';
+      } else if (lowerMessage.includes('coffee')) {
+        locationType = 'cafe';
+      } else if (lowerMessage.includes('gym') || lowerMessage.includes('workout') || 
+                 lowerMessage.includes('exercise')) {
+        locationType = 'gym';
+      } else if (lowerMessage.includes('meeting') || eventType === 'business') {
+        locationType = 'meeting';
+      } else if (lowerMessage.includes('shopping')) {
+        locationType = 'shopping_mall';
+      } else if (eventType === 'hobby') {
+        locationType = 'amusement_park';
+      }
+      
+      // Get location suggestions
+      const locationSuggestions = await locationService.getSuggestedLocations(
+        userLocation,
+        locationType,
+        15000 // 15km radius
+      );
+      
+      // Convert suggestions to EventLocation format
+      const locations = await Promise.all(
+        locationSuggestions.slice(0, 3).map(async (suggestion) => {
+          try {
+            const details = await locationService.getPlaceDetails(suggestion.placeId);
+            return details.location;
+          } catch (error) {
+            // Fallback if details fetch fails
+            return {
+              name: suggestion.mainText,
+              address: suggestion.secondaryText,
+              placeId: suggestion.placeId,
+              type: suggestion.types[0],
+              url: `https://www.google.com/maps/place/?q=place_id:${suggestion.placeId}`
+            } as EventLocation;
+          }
+        })
+      );
+      
+      return locations;
+    } catch (error) {
+      console.error('Error generating location suggestions:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get user's location from browser or return default
+   */
+  private async getUserLocation(): Promise<{ lat: number; lng: number }> {
+    try {
+      // Check if we have a cached location
+      const cachedLocation = localStorage.getItem('userLocation');
+      if (cachedLocation) {
+        return JSON.parse(cachedLocation);
+      }
+      
+      // Default to New York if no location is set
+      return { lat: 40.7128, lng: -74.0060 };
+    } catch (error) {
+      console.error('Failed to get user location:', error);
+      return { lat: 40.7128, lng: -74.0060 };
+    }
   }
 
   /**

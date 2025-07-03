@@ -98,23 +98,28 @@ class GmailService {
     return url;
   }
 
-  // Handle OAuth callback and exchange code for tokens
+    // Handle OAuth callback and exchange code for tokens
   public async authenticate(authCode?: string): Promise<boolean> {
     try {
       if (!authCode) {
-        // Open OAuth URL in browser
-        const authUrl = this.getAuthUrl();
-        
-        // In Electron, we can open external URLs
+        // In Electron, use the automatic OAuth flow
         if (window.electronAPI) {
-          // For now, show the URL to user manually
-          const userCode = prompt(`Please visit this URL to authenticate with Google:\n\n${authUrl}\n\nThen paste the authorization code here:`);
-          if (!userCode) {
+          try {
+            console.log('🚀 Starting automatic Google OAuth flow...');
+            
+            // Use the new automatic OAuth flow
+            authCode = await window.electronAPI.startGoogleOAuth();
+            
+            console.log('✅ Authorization code received automatically');
+            
+          } catch (error) {
+            console.error('Automatic OAuth flow failed:', error);
+            console.error('Error details:', error instanceof Error ? error.message : String(error));
             return false;
           }
-          authCode = userCode;
         } else {
-          // In web browser
+          // In web browser - fallback to manual flow
+          const authUrl = this.getAuthUrl();
           window.open(authUrl, '_blank');
           return false; // User needs to complete OAuth flow
         }
@@ -125,12 +130,13 @@ class GmailService {
       }
 
       // Exchange authorization code for tokens
+      console.log('🔄 Exchanging authorization code for tokens...');
       const { tokens } = await this.auth.getToken(authCode);
       this.auth.setCredentials(tokens);
 
       // Store tokens securely
       localStorage.setItem('googleTokens', JSON.stringify(tokens));
-        localStorage.setItem('gmailConnected', 'true');
+      localStorage.setItem('gmailConnected', 'true');
       
       this.isConnected = true;
       console.log('✅ Google authentication successful');
@@ -141,6 +147,7 @@ class GmailService {
       return true;
     } catch (error) {
       console.error('❌ Google authentication failed:', error);
+      console.error('Error details:', error instanceof Error ? error.message : String(error));
       this.clearStoredTokens();
       return false;
     }
