@@ -11,6 +11,7 @@ if (require('electron-squirrel-startup')) {
 }
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
+declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -127,7 +128,7 @@ const createWindow = (): void => {
       nodeIntegration: false,
       contextIsolation: true,
       webSecurity: false,
-      preload: path.join(__dirname, 'preload.js'),
+      preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
     },
     icon: path.join(__dirname, '../../assets/icon.png'),
     show: false, // Don't show until ready-to-show
@@ -138,10 +139,10 @@ const createWindow = (): void => {
     resizable: true,
   });
 
-  // Load the HTML file directly
-  const htmlPath = path.join(__dirname, '../renderer/index.html');
-  console.log('Loading HTML from:', htmlPath);
-  mainWindow.loadFile(htmlPath);
+  // Load the webpack entry point
+  console.log('Loading webpack entry:', MAIN_WINDOW_WEBPACK_ENTRY);
+  console.log('Loading preload script:', MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY);
+  mainWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
 
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
@@ -180,40 +181,95 @@ const createWindow = (): void => {
 
 // Enhanced tray with upcoming events
 const createTray = (): void => {
-  // Create tray icon - try multiple paths to find the icon
-  const possiblePaths = [
-    path.join(__dirname, '../../assets/tray-icon.png'),
-    path.join(__dirname, '../assets/tray-icon.png'),
-    path.join(__dirname, '../../src/assets/tray-icon.png'),
-    path.join(process.cwd(), 'src/assets/tray-icon.png'),
-    path.join(process.cwd(), 'FlowGenius/src/assets/tray-icon.png'),
-    path.join(app.getAppPath(), 'src/assets/tray-icon.png')
-  ];
-  
+  // Create tray icon - handle both development and production paths
   let iconPath = '';
-  console.log('🔧 Looking for tray icon in multiple locations...');
-  console.log('Current working directory:', process.cwd());
-  console.log('__dirname:', __dirname);
-  console.log('app.getAppPath():', app.getAppPath());
   
-  // Try to find the icon file
-  for (const testPath of possiblePaths) {
-    console.log('🔍 Trying path:', testPath);
-    try {
-      const fs = require('fs');
-      if (fs.existsSync(testPath)) {
-        iconPath = testPath;
-        console.log('✅ Found tray icon at:', iconPath);
-        break;
+  // For production builds, the icon should be in the resources folder
+  if (app.isPackaged) {
+    // In production, icons are in the resources folder
+    const possiblePaths = [
+      path.join(process.resourcesPath, 'tray-icon.png'),
+      path.join(process.resourcesPath, 'icon.png'),
+      path.join(process.resourcesPath, 'app', 'src', 'assets', 'tray-icon.png'),
+      path.join(process.resourcesPath, 'app.asar', 'src', 'assets', 'tray-icon.png'),
+      path.join(__dirname, 'assets', 'tray-icon.png'),
+      path.join(__dirname, '..', 'assets', 'tray-icon.png'),
+      path.join(__dirname, '..', '..', 'assets', 'tray-icon.png')
+    ];
+    
+    console.log('🔧 Looking for tray icon in production paths...');
+    console.log('process.resourcesPath:', process.resourcesPath);
+    
+    for (const testPath of possiblePaths) {
+      console.log('🔍 Trying production path:', testPath);
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(testPath)) {
+          iconPath = testPath;
+          console.log('✅ Found tray icon at:', iconPath);
+          break;
+        }
+      } catch (error) {
+        console.log('❌ Error checking path:', testPath, (error as Error).message);
       }
-    } catch (error) {
-      console.log('❌ Error checking path:', testPath, (error as Error).message);
+    }
+  } else {
+    // Development paths
+    const possiblePaths = [
+      path.join(__dirname, '../../assets/tray-icon.png'),
+      path.join(__dirname, '../assets/tray-icon.png'),
+      path.join(__dirname, '../../src/assets/tray-icon.png'),
+      path.join(process.cwd(), 'src/assets/tray-icon.png'),
+      path.join(process.cwd(), 'FlowGenius/src/assets/tray-icon.png'),
+      path.join(app.getAppPath(), 'src/assets/tray-icon.png')
+    ];
+    
+    console.log('🔧 Looking for tray icon in development paths...');
+    console.log('Current working directory:', process.cwd());
+    console.log('__dirname:', __dirname);
+    console.log('app.getAppPath():', app.getAppPath());
+    
+    for (const testPath of possiblePaths) {
+      console.log('🔍 Trying dev path:', testPath);
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(testPath)) {
+          iconPath = testPath;
+          console.log('✅ Found tray icon at:', iconPath);
+          break;
+        }
+      } catch (error) {
+        console.log('❌ Error checking path:', testPath, (error as Error).message);
+      }
     }
   }
   
+  // If no tray-icon.png found, try to use the main icon
   if (!iconPath) {
-    console.error('❌ Could not find tray-icon.png in any expected location');
-    console.log('Available paths checked:', possiblePaths);
+    console.warn('⚠️ Could not find tray-icon.png, trying main icon...');
+    const mainIconPaths = app.isPackaged ? [
+      path.join(process.resourcesPath, 'app', 'src', 'assets', 'icon.png'),
+      path.join(process.resourcesPath, 'app.asar', 'src', 'assets', 'icon.png'),
+      path.join(__dirname, 'assets', 'icon.png'),
+      path.join(__dirname, '..', 'assets', 'icon.png')
+    ] : [
+      path.join(__dirname, '../../src/assets/icon.png'),
+      path.join(process.cwd(), 'src/assets/icon.png'),
+      path.join(process.cwd(), 'FlowGenius/src/assets/icon.png')
+    ];
+    
+    for (const testPath of mainIconPaths) {
+      try {
+        const fs = require('fs');
+        if (fs.existsSync(testPath)) {
+          iconPath = testPath;
+          console.log('✅ Using main icon as tray icon:', iconPath);
+          break;
+        }
+      } catch (error) {
+        console.log('❌ Error checking main icon path:', testPath);
+      }
+    }
   }
   
   let trayIcon: Electron.NativeImage;
@@ -221,6 +277,12 @@ const createTray = (): void => {
   if (iconPath) {
     try {
       trayIcon = nativeImage.createFromPath(iconPath);
+      
+      // On Windows, ensure the icon is the right size
+      if (process.platform === 'win32') {
+        trayIcon = trayIcon.resize({ width: 16, height: 16 });
+      }
+      
       if (trayIcon.isEmpty()) {
         console.warn('⚠️ Tray icon is empty, using fallback');
         // Create a simple icon as fallback
@@ -651,12 +713,24 @@ ipcMain.handle('open-external-url', async (_event, url: string) => {
   }
 });
 
+// Test IPC handler
+ipcMain.handle('test-ipc', async () => {
+  console.log('🧪 TEST IPC: Handler called successfully');
+  return 'IPC communication is working!';
+});
+
 // Handle Google OAuth flow with actual HTTP server
 ipcMain.handle('start-google-oauth', async () => {
-  return new Promise<string>((resolve, reject) => {
+  console.log('🎯 IPC Handler: start-google-oauth called');
+  console.log('🔍 DEBUG: Handler timestamp:', new Date().toISOString());
+  
+  try {
+    return new Promise<string>((resolve, reject) => {
+      console.log('🚀 Promise created - starting OAuth server setup...');
     console.log('🚀 Starting Google OAuth flow...');
     console.log('🔍 DEBUG: Current working directory:', process.cwd());
     console.log('🔍 DEBUG: Process platform:', process.platform);
+    console.log('🔍 DEBUG: Node version:', process.version);
     
     let authCodeCaptured = false;
     let server: any = null;
@@ -732,9 +806,10 @@ ipcMain.handle('start-google-oauth', async () => {
                 
                 setTimeout(() => {
                   server.close();
+                  console.log('🔄 OAuth server closed after successful authentication');
                 }, 2000);
                 
-                                  resolve(authCode);
+                resolve(authCode);
               } else {
                 console.error('❌ No authorization code in callback');
                 res.writeHead(400, {'Content-Type': 'text/html'});
@@ -797,11 +872,13 @@ ipcMain.handle('start-google-oauth', async () => {
         srv.on('listening', () => {
           console.log(`✅ OAuth server successfully listening on port ${port}`);
           console.log(`🔍 DEBUG: Server address:`, srv.address());
+          console.log(`🔍 DEBUG: Server can receive connections on http://localhost:${port}`);
           serverResolve(srv);
         });
         
-        srv.listen(port, () => {
-          console.log(`🔄 OAuth server attempting to bind to port ${port} (all interfaces)`);
+        // Listen on localhost interface explicitly
+        srv.listen(port, 'localhost', () => {
+          console.log(`🔄 OAuth server attempting to bind to port ${port} (localhost only)`);
         });
       });
     };
@@ -825,9 +902,11 @@ ipcMain.handle('start-google-oauth', async () => {
     };
     
     // Start the server
+    console.log('🔍 DEBUG: About to call tryPorts()...');
     tryPorts().then(({ server: srv, port }) => {
       server = srv;
       console.log(`🎯 OAuth server ready on port ${port}`);
+      console.log('🔍 DEBUG: Server successfully created and listening');
       
       // Build the Google OAuth URL
       const clientId = '1001911230665-9qn1se3g00mn17p5vd0h2lt5kti2l1b9.apps.googleusercontent.com';
@@ -863,6 +942,26 @@ ipcMain.handle('start-google-oauth', async () => {
       
       // Load the OAuth URL
       console.log('🌐 Opening OAuth window...');
+      console.log('🔍 DEBUG: OAuth URL being loaded:', authUrl);
+      
+      // Add debugging for the auth window
+      authWindow.webContents.on('did-start-loading', () => {
+        console.log('🔍 DEBUG: Auth window started loading');
+      });
+      
+      authWindow.webContents.on('did-finish-load', () => {
+        console.log('🔍 DEBUG: Auth window finished loading');
+        console.log('🔍 DEBUG: Current URL:', authWindow.webContents.getURL());
+      });
+      
+      authWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+        console.error('❌ Auth window failed to load:', errorCode, errorDescription, validatedURL);
+      });
+      
+      authWindow.webContents.on('will-redirect', (event, url) => {
+        console.log('🔍 DEBUG: Auth window redirecting to:', url);
+      });
+      
       authWindow.loadURL(authUrl);
       
       // The cleanup will be handled in the timeout and window close events
@@ -915,9 +1014,16 @@ ipcMain.handle('start-google-oauth', async () => {
       
     }).catch((error) => {
       console.error('❌ Failed to start OAuth server:', error);
+      console.error('🔍 DEBUG: tryPorts error type:', error instanceof Error ? error.constructor.name : typeof error);
+      console.error('🔍 DEBUG: tryPorts error message:', error instanceof Error ? error.message : String(error));
+      console.error('🔍 DEBUG: tryPorts error stack:', error instanceof Error ? error.stack : 'No stack trace');
       reject(error);
     });
-  });
+    });
+  } catch (error) {
+    console.error('❌ IPC Handler Exception:', error);
+    throw error;
+  }
 });
 
  

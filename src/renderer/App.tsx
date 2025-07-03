@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
@@ -13,7 +13,7 @@ import AuthModal from './components/Auth/AuthModal';
 import EnhancedEventModal from './components/Events/EnhancedEventModal';
 import OnboardingTutorial from './components/Tutorial/OnboardingTutorial';
 import { ChatInterface } from './components/AIAssistant/ChatInterface';
-import { authService, eventService, type Profile } from './services/supabase';
+import { authService, eventService, profileService, type Profile } from './services/supabase';
 import { EventFormData } from './types';
 import type { User, Session } from '@supabase/supabase-js';
 import { useDispatch, useSelector } from 'react-redux';
@@ -442,9 +442,7 @@ const App: React.FC = () => {
     
     try {
       // Load user profile
-      const profile = await import('./services/supabase').then(module => 
-        module.profileService.getProfile(user.id)
-      );
+      const profile = await profileService.getProfile(user.id);
       setUserProfile(profile);
       console.log('👤 User profile loaded:', profile);
     } catch (error) {
@@ -833,11 +831,36 @@ const App: React.FC = () => {
     return filteredEvents.filter(event => event.date >= start && event.date <= end);
   };
 
+  // Test IPC communication
+  const testIPCCommunication = async () => {
+    try {
+      console.log('🧪 Testing IPC communication...');
+      
+      if (window.electronAPI && window.electronAPI.testIPC) {
+        const result = await window.electronAPI.testIPC();
+        console.log('✅ IPC Test Result:', result);
+      } else {
+        console.error('❌ testIPC method not available');
+      }
+    } catch (error) {
+      console.error('❌ IPC Test Failed:', error);
+    }
+  };
+
   // Gmail & Google Calendar Integration Functions
   const handleGmailConnect = async () => {
     try {
       console.log('🔗 Initiating Google Calendar connection...');
+      console.log('🔧 DEBUG: ElectronAPI available?', !!window.electronAPI);
+      console.log('🔧 DEBUG: startGoogleOAuth method available?', !!window.electronAPI?.startGoogleOAuth);
+      
+      // Test IPC communication first
+      await testIPCCommunication();
+      
       const success = await gmailService.authenticate();
+      
+      console.log('🔧 DEBUG: Authentication result:', success);
+      
       if (success) {
         setGmailConnected(true);
         notificationService.showNotification(
@@ -848,9 +871,18 @@ const App: React.FC = () => {
         
         // Automatically sync after connection
         await handleSyncWithGoogleCalendar();
+      } else {
+        console.log('❌ Authentication failed - no success response');
+        notificationService.showNotification(
+          '❌ Connection Failed',
+          'Google Calendar authentication failed. Please try again.',
+          { type: 'system' }
+        );
       }
     } catch (error) {
       console.error('Google Calendar connection failed:', error);
+      console.error('🔧 DEBUG: Error details:', error instanceof Error ? error.message : String(error));
+      console.error('🔧 DEBUG: Error stack:', error instanceof Error ? error.stack : 'No stack trace');
       notificationService.showNotification(
         '❌ Connection Failed',
         'Failed to connect to Google Calendar. Please try again.',

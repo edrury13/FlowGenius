@@ -3,6 +3,7 @@
 
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { dialog } from 'electron';
 
 const execAsync = promisify(exec);
 
@@ -27,6 +28,7 @@ class WindowsAppTracker {
   private currentSession: AppUsageSession | null = null;
   private trackingInterval: NodeJS.Timeout | null = null;
   private isTracking = false;
+  private hasShownPermissionError = false;
 
   // App categorization - ONLY for apps that commonly exist
   private appCategories: { [key: string]: string } = {
@@ -66,16 +68,60 @@ class WindowsAppTracker {
   public async startTracking(): Promise<void> {
     if (this.isTracking) return;
     
-    this.isTracking = true;
-    console.log('📊 Starting real Windows app tracking...');
-    
-    // Get initial active window
-    await this.updateActiveWindow();
-    
-    // Check for active window changes every 5 seconds
-    this.trackingInterval = setInterval(async () => {
+    try {
+      // Test if we can run PowerShell commands
+      await this.testPowerShellAccess();
+      
+      this.isTracking = true;
+      console.log('📊 Starting real Windows app tracking...');
+      
+      // Get initial active window
       await this.updateActiveWindow();
-    }, 5000);
+      
+      // Check for active window changes every 5 seconds
+      this.trackingInterval = setInterval(async () => {
+        await this.updateActiveWindow();
+      }, 5000);
+    } catch (error) {
+      console.error('❌ Failed to start tracking:', error);
+      this.handleTrackingError(error);
+    }
+  }
+
+  private async testPowerShellAccess(): Promise<void> {
+    try {
+      // Simple test command to check PowerShell access
+      const { stdout } = await execAsync('powershell -Command "echo test"');
+      if (!stdout.includes('test')) {
+        throw new Error('PowerShell test failed');
+      }
+      console.log('✅ PowerShell access confirmed');
+    } catch (error) {
+      console.error('❌ PowerShell access test failed:', error);
+      throw new Error('Cannot access PowerShell. Tracking features may not work.');
+    }
+  }
+
+  private handleTrackingError(error: any): void {
+    this.isTracking = false;
+    
+    if (this.trackingInterval) {
+      clearInterval(this.trackingInterval);
+      this.trackingInterval = null;
+    }
+    
+    // Show error dialog only once
+    if (!this.hasShownPermissionError && global.mainWindow && !global.mainWindow.isDestroyed()) {
+      this.hasShownPermissionError = true;
+      
+      dialog.showMessageBox(global.mainWindow, {
+        type: 'warning',
+        title: 'Tracking Feature Unavailable',
+        message: 'The app tracking feature requires PowerShell access which may be restricted on your system.',
+        detail: 'You can still use all other FlowGenius features. To enable tracking, try running FlowGenius as Administrator.',
+        buttons: ['OK']
+      });
+    }
   }
 
   public stopTracking(): void {

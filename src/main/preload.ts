@@ -1,5 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+console.log('🔧 PRELOAD: Script is being executed');
+console.log('🔧 PRELOAD: contextBridge available?', !!contextBridge);
+console.log('🔧 PRELOAD: ipcRenderer available?', !!ipcRenderer);
+
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -44,10 +48,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Google OAuth flow
   startGoogleOAuth: () => ipcRenderer.invoke('start-google-oauth'),
   
+  // Test IPC communication
+  testIPC: () => ipcRenderer.invoke('test-ipc'),
+  
   // Remove listeners
   removeAllListeners: (channel: string) => 
     ipcRenderer.removeAllListeners(channel),
 });
+
+console.log('🔧 PRELOAD: electronAPI exposed to window');
+console.log('🔧 PRELOAD: Available methods:', Object.keys({
+  getAppUsageData: true,
+  toggleAppTracking: true,
+  onAppUsageSession: true,
+  showNotification: true,
+  onQuickAddEvent: true,
+  onShowTodayEvents: true,
+  onFocusEvent: true,
+  onOpenSettings: true,
+  checkForUpdates: true,
+  getAppInfo: true,
+  updateUpcomingEvents: true,
+  openExternalUrl: true,
+  startGoogleOAuth: true,
+  testIPC: true,
+  removeAllListeners: true,
+}));
 
 // Type declarations for the exposed API
 declare global {
@@ -75,6 +101,7 @@ declare global {
       updateUpcomingEvents: (events: any[]) => void;
       openExternalUrl: (url: string) => Promise<void>;
       startGoogleOAuth: () => Promise<string>;
+      testIPC: () => Promise<string>;
       removeAllListeners: (channel: string) => void;
     };
   }

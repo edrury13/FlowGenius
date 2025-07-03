@@ -6,6 +6,7 @@ module.exports = {
     asar: true,
     name: 'FlowGenius',
     productName: 'FlowGenius',
+    appId: 'com.flowgenius.app',
     description: 'Productivity & Planning Application',
     version: '1.0.0',
     copyright: 'Copyright © 2024 FlowGenius',
@@ -13,6 +14,21 @@ module.exports = {
     executableName: 'FlowGenius',
     appBundleId: 'com.flowgenius.app',
     appCategoryType: 'public.app-category.productivity',
+    // Include assets in the build
+    extraResource: [
+      './src/assets/icon.png',
+      './src/assets/tray-icon.png',
+      './src/assets/icon.ico',
+      './src/assets/notification-icon.png'
+    ],
+    // Windows specific settings
+    win32metadata: {
+      CompanyName: 'FlowGenius',
+      FileDescription: 'FlowGenius - Productivity & Planning Application',
+      OriginalFilename: 'FlowGenius.exe',
+      ProductName: 'FlowGenius',
+      InternalName: 'FlowGenius'
+    },
     protocols: [
       {
         name: 'FlowGenius Protocol',
@@ -30,18 +46,19 @@ module.exports = {
         description: 'Productivity & Planning Application',
         authors: 'FlowGenius Team',
         exe: 'FlowGenius.exe',
-        noMsi: true,
+        noMsi: false, // Changed to create MSI for better Windows integration
         setupExe: 'FlowGenius-Setup.exe',
         setupIcon: './src/assets/icon.ico',
         // Auto-updater settings
         remoteReleases: false, // Set to GitHub releases URL for production
         // certificateFile: 'path/to/certificate.p12', // For code signing
         // certificatePassword: 'certificate-password',
-        // Auto-launch after installation
+        // Windows integration
         createDesktopShortcut: true,
         createStartMenuShortcut: true,
-        // Install location
-        // installDirectory: '%LOCALAPPDATA%\\FlowGenius'
+        shortcutFolderName: 'FlowGenius',
+        // This ensures the app appears in Windows search
+        programFilesFolderName: 'FlowGenius'
       },
     },
     {
@@ -93,27 +110,27 @@ module.exports = {
     // }
   ],
   plugins: [
-    // Temporarily disabled webpack plugin
-    // {
-    //   name: '@electron-forge/plugin-webpack',
-    //   config: {
-    //     mainConfig: './webpack.main.config.js',
-    //     renderer: {
-    //       config: './webpack.renderer.config.js',
-    //       entryPoints: [
-    //         {
-    //           html: './src/renderer/index.html',
-    //           js: './src/renderer/index.tsx',
-    //           name: 'main_window',
-    //           preload: {
-    //             js: './src/main/preload.ts',
-    //           },
-    //         },
-    //       ],
-    //     },
-    //     devContentSecurityPolicy: "default-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-eval' 'unsafe-inline' data:",
-    //   },
-    // },
+    // Enable webpack plugin for proper preload script building
+    {
+      name: '@electron-forge/plugin-webpack',
+      config: {
+        mainConfig: './webpack.main.config.js',
+        renderer: {
+          config: './webpack.renderer.config.js',
+          entryPoints: [
+            {
+              html: './src/renderer/index.html',
+              js: './src/renderer/index.tsx',
+              name: 'main_window',
+              preload: {
+                js: './src/main/preload.ts',
+              },
+            },
+          ],
+        },
+        devContentSecurityPolicy: "default-src 'self' 'unsafe-inline' data:; script-src 'self' 'unsafe-eval' 'unsafe-inline' data:",
+      },
+    },
     {
       name: '@electron-forge/plugin-auto-unpack-natives',
       config: {},
