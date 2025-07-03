@@ -48,8 +48,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Google OAuth flow
   startGoogleOAuth: () => ipcRenderer.invoke('start-google-oauth'),
   
+  // Google Calendar APIs
+  getGoogleAuthStatus: () => ipcRenderer.invoke('google-auth-status'),
+  signOutGoogle: () => ipcRenderer.invoke('google-auth-signout'),
+  syncGoogleCalendar: () => ipcRenderer.invoke('google-calendar-sync'),
+  getGoogleCalendarEvents: (options?: {
+    calendarId?: string;
+    timeMin?: string;
+    timeMax?: string;
+    useCache?: boolean;
+  }) => ipcRenderer.invoke('google-calendar-events', options),
+  getGoogleCalendars: (useCache?: boolean) => ipcRenderer.invoke('google-calendar-calendars', useCache),
+  createGoogleCalendarEvent: (calendarId: string, event: any) => 
+    ipcRenderer.invoke('google-calendar-create-event', calendarId, event),
+  updateGoogleCalendarEvent: (calendarId: string, eventId: string, event: any) => 
+    ipcRenderer.invoke('google-calendar-update-event', calendarId, eventId, event),
+  deleteGoogleCalendarEvent: (calendarId: string, eventId: string) => 
+    ipcRenderer.invoke('google-calendar-delete-event', calendarId, eventId),
+  
   // Test IPC communication
   testIPC: () => ipcRenderer.invoke('test-ipc'),
+  
+  // Tray popup methods
+  showMainWindow: () => ipcRenderer.invoke('show-main-window'),
+  openCalendar: () => ipcRenderer.invoke('open-calendar'),
+  getTodayEvents: () => ipcRenderer.invoke('get-today-events'),
+  createEvent: (event: any) => ipcRenderer.invoke('create-event', event),
   
   // Remove listeners
   removeAllListeners: (channel: string) => 
@@ -71,7 +95,19 @@ console.log('🔧 PRELOAD: Available methods:', Object.keys({
   updateUpcomingEvents: true,
   openExternalUrl: true,
   startGoogleOAuth: true,
+  getGoogleAuthStatus: true,
+  signOutGoogle: true,
+  syncGoogleCalendar: true,
+  getGoogleCalendarEvents: true,
+  getGoogleCalendars: true,
+  createGoogleCalendarEvent: true,
+  updateGoogleCalendarEvent: true,
+  deleteGoogleCalendarEvent: true,
   testIPC: true,
+  showMainWindow: true,
+  openCalendar: true,
+  getTodayEvents: true,
+  createEvent: true,
   removeAllListeners: true,
 }));
 
@@ -101,7 +137,32 @@ declare global {
       updateUpcomingEvents: (events: any[]) => void;
       openExternalUrl: (url: string) => Promise<void>;
       startGoogleOAuth: () => Promise<string>;
+      getGoogleAuthStatus: () => Promise<{
+        isAuthenticated: boolean;
+        userInfo: {
+          id: string;
+          email: string;
+          name: string;
+          picture?: string;
+        } | null;
+      }>;
+      signOutGoogle: () => Promise<{ success: boolean }>;
+      syncGoogleCalendar: () => Promise<{ success: boolean; lastSync: Date | null }>;
+      getGoogleCalendarEvents: (options?: {
+        calendarId?: string;
+        timeMin?: string;
+        timeMax?: string;
+        useCache?: boolean;
+      }) => Promise<any[]>;
+      getGoogleCalendars: (useCache?: boolean) => Promise<any[]>;
+      createGoogleCalendarEvent: (calendarId: string, event: any) => Promise<any>;
+      updateGoogleCalendarEvent: (calendarId: string, eventId: string, event: any) => Promise<any>;
+      deleteGoogleCalendarEvent: (calendarId: string, eventId: string) => Promise<{ success: boolean }>;
       testIPC: () => Promise<string>;
+      showMainWindow: () => Promise<void>;
+      openCalendar: () => Promise<void>;
+      getTodayEvents: () => Promise<any[]>;
+      createEvent: (event: any) => Promise<any>;
       removeAllListeners: (channel: string) => void;
     };
   }

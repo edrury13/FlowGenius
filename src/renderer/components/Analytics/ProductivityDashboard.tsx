@@ -87,11 +87,6 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
     setSettings(prev => prev ? { ...prev, ...newSettings } : null);
   };
 
-  const generateMockData = () => {
-    trackingService.generateMockData();
-    loadData();
-  };
-
   const exportData = () => {
     const data = trackingService.exportData();
     const blob = new Blob([data], { type: 'application/json' });
@@ -109,26 +104,6 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
     if (confirm('Are you sure you want to clear all tracking data? This cannot be undone.')) {
       trackingService.clearData();
       loadData();
-    }
-  };
-
-  const forceRestartRealTracking = async () => {
-    if (confirm('FORCE RESTART real tracking and clear ALL fake data? This will delete all existing data including Figma/Notion/Discord entries.')) {
-      console.log('🔥 FORCE RESTARTING real tracking...');
-      
-      try {
-        // Use the enhanced force restart method
-        await trackingService.forceRestartRealTracking();
-        
-        // Refresh the UI after restart
-        setTimeout(() => {
-          loadData();
-        }, 1000);
-        
-        console.log('✅ Real tracking FORCE RESTARTED successfully!');
-      } catch (error) {
-        console.error('❌ Failed to FORCE RESTART real tracking:', error);
-      }
     }
   };
 
@@ -372,9 +347,6 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
                 </div>
                 
                 <div style={styles.actionButtons}>
-                  <button style={{...styles.button, ...styles.primaryButton}} onClick={generateMockData}>
-                    Generate Sample Data
-                  </button>
                   <button style={styles.button} onClick={exportData}>
                     Export Data
                   </button>
@@ -469,29 +441,6 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
                     <span style={styles.metricValue}>
                       {realTrackingStatus?.runningApps?.length || 0} detected
                     </span>
-                  </div>
-                  
-                  {/* Debug section */}
-                  <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e5e7eb' }}>
-                    <button
-                      onClick={async () => {
-                        console.log('🔍 Manual tracking status check...');
-                        try {
-                          const status = await trackingService.getRealTrackingStatus();
-                          console.log('📊 Real tracking status:', status);
-                          
-                          if (window.electronAPI) {
-                            const appData = await window.electronAPI.getAppUsageData();
-                            console.log('📊 App usage data from main:', appData);
-                          }
-                        } catch (error) {
-                          console.error('❌ Error checking tracking status:', error);
-                        }
-                      }}
-                      style={{...styles.button, ...styles.primaryButton}}
-                    >
-                      Debug: Check Tracking Status
-                    </button>
                   </div>
                   
                   {realTrackingStatus?.runningApps && realTrackingStatus.runningApps.length > 0 && (
@@ -626,10 +575,7 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
               {!metrics && !loading && (
                 <div style={styles.card}>
                   <h3 style={styles.cardTitle}>No Data Available</h3>
-                  <p>No tracking data found. Enable tracking or generate sample data to see analytics.</p>
-                  <button style={{...styles.button, ...styles.primaryButton}} onClick={generateMockData}>
-                    Generate Sample Data
-                  </button>
+                  <p>No tracking data found. Enable tracking in the settings above to start collecting analytics.</p>
                 </div>
               )}
             </>

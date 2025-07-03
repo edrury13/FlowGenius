@@ -64,6 +64,7 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "chart.js": "^4.5.0",
+    "date-fns": "^4.1.0",
     "dayjs": "^1.11.13",
     "dotenv": "^17.0.0",
     "electron-squirrel-startup": "^1.0.1",

@@ -14,7 +14,7 @@ const SimpleApp: React.FC = () => {
       justifyContent: 'center',
       flexDirection: 'column',
     }}>
-      <h1>🚀 FlowGenius</h1>
+      <h1>FlowGenius</h1>
       <p>Your productivity companion is now working!</p>
       <p>✅ React is successfully loaded</p>
       <p>✅ TypeScript is working</p>

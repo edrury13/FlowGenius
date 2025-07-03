@@ -1,9 +1,11 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, globalShortcut, dialog, shell, screen } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as http from 'http';
 import * as url from 'url';
 import windowsAppTracker from './tracking';
+import googleAuthService from './services/googleAuth';
+import googleCalendarService from './services/googleCalendar';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -13,14 +15,15 @@ if (require('electron-squirrel-startup')) {
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
-let mainWindow: BrowserWindow | null = null;
-let tray: Tray | null = null;
+let mainWindow: Electron.BrowserWindow | null = null;
+let tray: Electron.Tray | null = null;
+let trayPopup: Electron.BrowserWindow | null = null;
 let isQuiting = false;
 let upcomingEvents: any[] = [];
 
 // Make mainWindow globally accessible for the tracker
 declare global {
-  var mainWindow: BrowserWindow | null;
+  var mainWindow: Electron.BrowserWindow | null;
 }
 
 global.mainWindow = mainWindow;
@@ -179,6 +182,56 @@ const createWindow = (): void => {
   // }
 };
 
+const createTrayPopup = (): void => {
+  if (trayPopup) {
+    trayPopup.destroy();
+    trayPopup = null;
+  }
+
+  trayPopup = new BrowserWindow({
+    width: 350,
+    height: 450,
+    show: false,
+    frame: false,
+    resizable: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
+      webSecurity: false
+    }
+  });
+
+  // Load the tray popup content
+  trayPopup.loadURL(MAIN_WINDOW_WEBPACK_ENTRY + '#/tray-popup');
+
+  // Handle popup losing focus
+  trayPopup.on('blur', () => {
+    if (trayPopup && !trayPopup.isDestroyed()) {
+      trayPopup.hide();
+    }
+  });
+
+  // Position the popup above the tray icon
+  if (tray) {
+    const trayBounds = tray.getBounds();
+    const workArea = screen.getPrimaryDisplay().workArea;
+    
+    // Calculate position (above tray icon)
+    const x = Math.round(trayBounds.x + (trayBounds.width / 2) - (350 / 2));
+    const y = Math.round(trayBounds.y - 450 - 10); // 10px gap above tray
+    
+    // Ensure popup stays within screen bounds
+    const finalX = Math.max(0, Math.min(x, workArea.width - 350));
+    const finalY = Math.max(0, Math.min(y, workArea.height - 450));
+    
+    trayPopup.setPosition(finalX, finalY);
+  }
+};
+
 // Enhanced tray with upcoming events
 const createTray = (): void => {
   // Create tray icon - handle both development and production paths
@@ -320,7 +373,12 @@ const createTray = (): void => {
     
     // Set a basic context menu immediately
     const basicMenu = Menu.buildFromTemplate([
-      { label: 'Show FlowGenius', click: () => mainWindow?.show() },
+      { label: 'Show FlowGenius', click: () => { 
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+      }},
       { type: 'separator' },
       { label: 'Quit', click: () => { isQuiting = true; app.quit(); } }
     ]);
@@ -337,18 +395,7 @@ const createTray = (): void => {
       // Try to force the icon to be visible
       tray.setIgnoreDoubleClickEvents(false);
       
-      // Add click handler
-      tray.on('click', () => {
-        console.log('🖱️ Tray clicked');
-        if (mainWindow) {
-          if (mainWindow.isVisible()) {
-            mainWindow.hide();
-          } else {
-            mainWindow.show();
-            mainWindow.focus();
-          }
-        }
-      });
+      // Click handler is set up later in the main tray configuration
       
       tray.on('right-click', () => {
         console.log('🖱️ Tray right-clicked');
@@ -374,46 +421,9 @@ const createTray = (): void => {
       }, 1000);
     }
     
-    // Windows-specific debugging and tests
+    // Windows-specific tray handling
     if (process.platform === 'win32') {
-      console.log('🪟 Windows detected - running Windows-specific tray tests...');
-      
-      // Test if we can get tray bounds (indicates Windows can see it)
-      setTimeout(() => {
-        if (tray && !tray.isDestroyed()) {
-          console.log('✅ Tray object exists after 2 seconds');
-          
-          try {
-            const bounds = tray.getBounds();
-            console.log('📍 Tray bounds:', bounds);
-            if (bounds.width === 0 && bounds.height === 0) {
-              console.warn('⚠️ Tray bounds are 0x0 - this usually means Windows is hiding the icon');
-              console.warn('💡 SOLUTION: Check Windows notification area settings');
-            }
-          } catch (boundsError) {
-            console.warn('⚠️ Could not get tray bounds:', boundsError);
-          }
-          
-          // Test balloon notification to verify tray is accessible
-          try {
-            tray.displayBalloon({
-              iconType: 'info',
-              title: 'FlowGenius System Tray Test',
-              content: 'If you see this notification, the system tray is working but the icon might be hidden in Windows notification settings.'
-            });
-            console.log('🎈 Test balloon sent - if you see it, check notification area settings');
-          } catch (balloonError) {
-            console.error('❌ Could not display test balloon:', balloonError);
-            console.error('💡 SOLUTION: Windows may be blocking notifications. Try running as administrator.');
-          }
-          
-        } else {
-          console.error('❌ Tray object was destroyed or became null');
-        }
-      }, 2000);
-      
-    } else {
-      console.log('🍎 Non-Windows platform detected');
+      console.log('🪟 Windows tray initialization complete');
     }
     
   } catch (trayCreateError) {
@@ -541,15 +551,22 @@ const createTray = (): void => {
   updateTooltip();
   setInterval(updateTooltip, 60000); // Update every minute
 
-  // Show window on tray click
+  // Show tray popup on tray click
   if (tray) {
     tray.on('click', () => {
-      if (mainWindow) {
-        if (mainWindow.isVisible()) {
-          mainWindow.hide();
+      if (trayPopup && !trayPopup.isDestroyed()) {
+        if (trayPopup.isVisible()) {
+          trayPopup.hide();
         } else {
-          mainWindow.show();
-          mainWindow.focus();
+          createTrayPopup();
+          if (trayPopup) {
+            trayPopup.show();
+          }
+        }
+      } else {
+        createTrayPopup();
+        if (trayPopup) {
+          trayPopup.show();
         }
       }
     });
@@ -713,10 +730,97 @@ ipcMain.handle('open-external-url', async (_event, url: string) => {
   }
 });
 
-// Test IPC handler
-ipcMain.handle('test-ipc', async () => {
-  console.log('🧪 TEST IPC: Handler called successfully');
+// Test IPC communication
+ipcMain.handle('test-ipc', () => {
+  console.log('🔧 IPC test received');
   return 'IPC communication is working!';
+});
+
+// Google Calendar IPC handlers
+ipcMain.handle('google-auth-status', async () => {
+  return {
+    isAuthenticated: googleAuthService.isAuthenticated(),
+    userInfo: googleAuthService.getUserInfo()
+  };
+});
+
+ipcMain.handle('google-auth-signout', async () => {
+  await googleAuthService.signOut();
+  googleCalendarService.stopPeriodicSync();
+  googleCalendarService.clearCache();
+  return { success: true };
+});
+
+ipcMain.handle('google-calendar-sync', async () => {
+  try {
+    await googleCalendarService.syncEvents();
+    return { success: true, lastSync: googleCalendarService.getLastSyncTime() };
+  } catch (error) {
+    console.error('❌ Calendar sync failed:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('google-calendar-events', async (_event, options: {
+  calendarId?: string;
+  timeMin?: string;
+  timeMax?: string;
+  useCache?: boolean;
+} = {}) => {
+  try {
+    if (options.useCache) {
+      return googleCalendarService.getCachedEvents(options.calendarId);
+    }
+    
+    if (options.calendarId) {
+      return await googleCalendarService.getEvents(options.calendarId, options);
+    } else {
+      return await googleCalendarService.getAllEvents(options);
+    }
+  } catch (error) {
+    console.error('❌ Failed to get calendar events:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('google-calendar-calendars', async (_event, useCache: boolean = false) => {
+  try {
+    if (useCache) {
+      return googleCalendarService.getCachedCalendars();
+    }
+    return await googleCalendarService.getCalendars();
+  } catch (error) {
+    console.error('❌ Failed to get calendars:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('google-calendar-create-event', async (_event, calendarId: string, event: any) => {
+  try {
+    return await googleCalendarService.createEvent(calendarId, event);
+  } catch (error) {
+    console.error('❌ Failed to create event:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('google-calendar-update-event', async (_event, calendarId: string, eventId: string, event: any) => {
+  try {
+    return await googleCalendarService.updateEvent(calendarId, eventId, event);
+  } catch (error) {
+    console.error('❌ Failed to update event:', error);
+    throw error;
+  }
+});
+
+ipcMain.handle('google-calendar-delete-event', async (_event, calendarId: string, eventId: string) => {
+  try {
+    await googleCalendarService.deleteEvent(calendarId, eventId);
+    return { success: true };
+  } catch (error) {
+    console.error('❌ Failed to delete event:', error);
+    throw error;
+  }
 });
 
 // Handle Google OAuth flow with actual HTTP server
@@ -746,8 +850,11 @@ ipcMain.handle('start-google-oauth', async () => {
         const srv = http.createServer((req: any, res: any) => {
           const url = req.url;
           console.log('📨 OAuth callback received:', url);
-          console.log('📨 Request headers:', req.headers);
+          console.log('📨 Request headers (full):', JSON.stringify(req.headers, null, 2));
           console.log('📨 Request method:', req.method);
+          console.log('📨 Request URL (full):', req.url);
+          console.log('📨 Request host:', req.headers.host);
+          console.log('📨 Request user-agent:', req.headers['user-agent']);
           
           if (url.startsWith('/auth/google/callback')) {
             if (authCodeCaptured) {
@@ -758,14 +865,38 @@ ipcMain.handle('start-google-oauth', async () => {
             }
             
             try {
-              const urlParams = new URLSearchParams(url.split('?')[1]);
+              console.log('🔍 DEBUG: Processing OAuth callback...');
+              console.log('🔍 DEBUG: Full callback URL:', url);
+              
+              const urlParts = url.split('?');
+              console.log('🔍 DEBUG: URL parts:', urlParts);
+              
+              if (urlParts.length < 2) {
+                console.error('❌ No query parameters in callback URL');
+                throw new Error('No query parameters in callback URL');
+              }
+              
+              const queryString = urlParts[1];
+              console.log('🔍 DEBUG: Query string:', queryString);
+              
+              const urlParams = new URLSearchParams(queryString);
+              console.log('🔍 DEBUG: All URL params:', Object.fromEntries(urlParams.entries()));
+              
               const authCode = urlParams.get('code');
               const error = urlParams.get('error');
+              const errorDescription = urlParams.get('error_description');
+              const state = urlParams.get('state');
               
-              console.log('🔍 DEBUG: URL params:', Object.fromEntries(urlParams.entries()));
+              console.log('🔍 DEBUG: Extracted parameters:');
+              console.log('  - code (first 20 chars):', authCode ? authCode.substring(0, 20) + '...' : 'null');
+              console.log('  - code (full):', authCode);
+              console.log('  - error:', error);
+              console.log('  - error_description:', errorDescription);
+              console.log('  - state:', state);
               
               if (error) {
-                console.error('❌ OAuth error:', error);
+                console.error('❌ OAuth error from Google:', error);
+                console.error('❌ OAuth error description:', errorDescription);
                 res.writeHead(200, {'Content-Type': 'text/html'});
                 res.end(`
                   <!DOCTYPE html>
@@ -774,17 +905,19 @@ ipcMain.handle('start-google-oauth', async () => {
                     <body>
                       <h1>❌ OAuth Error</h1>
                       <p>Error: ${error}</p>
+                      <p>Description: ${errorDescription || 'No description provided'}</p>
                       <p>You can close this window.</p>
                     </body>
                   </html>
                 `);
                 server.close();
-                reject(new Error(`OAuth failed: ${error}`));
+                reject(new Error(`OAuth failed: ${error} - ${errorDescription}`));
                 return;
               }
               
               if (authCode) {
-                console.log('✅ Authorization code received:', authCode.substring(0, 20) + '...');
+                console.log('✅ Authorization code received successfully');
+                console.log('🔍 DEBUG: Auth code length:', authCode.length);
                 authCodeCaptured = true;
                 
                 res.writeHead(200, {'Content-Type': 'text/html'});
@@ -804,12 +937,24 @@ ipcMain.handle('start-google-oauth', async () => {
                   </html>
                 `);
                 
+                // Exchange code for tokens using our auth service
+                const redirectUri = `http://localhost:${port}/auth/google/callback`;
+                googleAuthService.exchangeCodeForTokens(authCode, redirectUri)
+                  .then((tokens) => {
+                    console.log('✅ Tokens exchanged successfully');
+                    // Start calendar sync
+                    googleCalendarService.startPeriodicSync();
+                    resolve(authCode);
+                  })
+                  .catch((error) => {
+                    console.error('❌ Failed to exchange tokens:', error);
+                    reject(error);
+                  });
+                
                 setTimeout(() => {
                   server.close();
                   console.log('🔄 OAuth server closed after successful authentication');
                 }, 2000);
-                
-                resolve(authCode);
               } else {
                 console.error('❌ No authorization code in callback');
                 res.writeHead(400, {'Content-Type': 'text/html'});
@@ -883,9 +1028,23 @@ ipcMain.handle('start-google-oauth', async () => {
       });
     };
     
-    // Try to create server on ports 3000, 3001, 3002, etc.
+    // Try to create server starting with port 3000 for OAuth consistency
     const tryPorts = async (startPort: number = 3000): Promise<any> => {
-      for (let port = startPort; port < startPort + 10; port++) {
+      // First try the standard OAuth port 3000
+      try {
+        console.log(`🔍 DEBUG: Trying preferred OAuth port 3000...`);
+        const srv = await createServer(3000);
+        console.log(`✅ Server created successfully on port 3000`);
+        return { server: srv, port: 3000 };
+      } catch (error: any) {
+        console.log(`❌ Port 3000 failed:`, error.message);
+        if (error.code !== 'EADDRINUSE') {
+          throw error;
+        }
+      }
+      
+      // If port 3000 is busy, try other ports
+      for (let port = 3001; port < 3010; port++) {
         try {
           console.log(`🔍 DEBUG: Trying port ${port}...`);
           const srv = await createServer(port);
@@ -908,22 +1067,9 @@ ipcMain.handle('start-google-oauth', async () => {
       console.log(`🎯 OAuth server ready on port ${port}`);
       console.log('🔍 DEBUG: Server successfully created and listening');
       
-      // Build the Google OAuth URL
-      const clientId = '1001911230665-9qn1se3g00mn17p5vd0h2lt5kti2l1b9.apps.googleusercontent.com';
+      // Build the Google OAuth URL using our auth service
       const redirectUri = `http://localhost:${port}/auth/google/callback`;
-      const scopes = [
-        'https://www.googleapis.com/auth/gmail.readonly',
-        'https://www.googleapis.com/auth/calendar',
-        'https://www.googleapis.com/auth/calendar.events'
-      ];
-      
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-        `access_type=offline&` +
-        `scope=${encodeURIComponent(scopes.join(' '))}&` +
-        `response_type=code&` +
-        `client_id=${encodeURIComponent(clientId)}&` +
-        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-        `prompt=consent`;
+      const authUrl = googleAuthService.getAuthUrl(redirectUri);
       
       console.log('🔗 OAuth URL:', authUrl);
       console.log('🎯 Redirect URI:', redirectUri);
@@ -1025,5 +1171,49 @@ ipcMain.handle('start-google-oauth', async () => {
     throw error;
   }
 });
+
+// Tray popup IPC handlers
+ipcMain.handle('show-main-window', () => {
+  console.log('🪟 Show main window requested');
+  if (trayPopup && !trayPopup.isDestroyed()) {
+    trayPopup.hide();
+  }
+  if (mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
+
+ipcMain.handle('open-calendar', () => {
+  console.log('📅 Open calendar requested');
+  if (mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+    // Could potentially navigate to calendar view here
+  }
+});
+
+ipcMain.handle('get-today-events', () => {
+  console.log('📅 Get today events requested');
+  // Return today's events from the upcomingEvents array
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  
+  const todayEvents = upcomingEvents.filter(event => {
+    const eventDate = new Date(event.start || event.startTime);
+    return eventDate.toISOString().split('T')[0] === todayStr;
+  });
+  
+  return todayEvents;
+});
+
+ipcMain.handle('create-event', (event, eventData) => {
+  console.log('📅 Create event requested:', eventData);
+  // This would typically integrate with the calendar service
+  // For now, just return a success response
+  return { success: true, event: eventData };
+});
+
+console.log('🔧 IPC handlers registered');
 
  

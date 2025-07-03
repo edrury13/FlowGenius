@@ -4,7 +4,7 @@ import { Provider } from 'react-redux';
 import { store } from './store';
 import App from './App';
 
-console.log('🚀 React entry point loaded');
+console.log('React entry point loaded');
 
 const container = document.getElementById('root');
 console.log('📍 Root container:', container);

@@ -13,6 +13,7 @@ import AuthModal from './components/Auth/AuthModal';
 import EnhancedEventModal from './components/Events/EnhancedEventModal';
 import OnboardingTutorial from './components/Tutorial/OnboardingTutorial';
 import { ChatInterface } from './components/AIAssistant/ChatInterface';
+import { TrayPopup } from './components/TrayPopup/TrayPopup';
 import { authService, eventService, profileService, type Profile } from './services/supabase';
 import { EventFormData } from './types';
 import type { User, Session } from '@supabase/supabase-js';
@@ -113,6 +114,21 @@ const convertFormDataToEvent = (formData: EventFormData, id?: string): Event => 
 };
 
 const App: React.FC = () => {
+  // Check for tray popup route
+  const currentHash = window.location.hash;
+  
+  // If this is the tray popup route, render only the tray popup
+  if (currentHash === '#/tray-popup') {
+    return (
+      <ThemeProvider theme={theme}>
+        <LocalizationProvider dateAdapter={AdapterDayjs}>
+          <CssBaseline />
+          <TrayPopup />
+        </LocalizationProvider>
+      </ThemeProvider>
+    );
+  }
+
   // Redux hooks
   const dispatch = useDispatch();
   const isAIAssistantVisible = useSelector(selectAIAssistantVisibility);
@@ -377,11 +393,11 @@ const App: React.FC = () => {
     const settings = notificationService.getSettings();
     console.log('📋 Loaded notification settings:', settings);
 
-    // Check Gmail connection
-    const isConnected = await gmailService.loadStoredTokens();
+    // Check Google Calendar connection
+    const isConnected = gmailService.isAuthenticated;
     setGmailConnected(isConnected);
     if (isConnected) {
-      console.log('📧 Gmail already connected');
+      console.log('📅 Google Calendar already connected');
     }
 
     // Initialize tracking service
@@ -891,9 +907,9 @@ const App: React.FC = () => {
     }
   };
 
-  const handleGmailDisconnect = () => {
+  const handleGmailDisconnect = async () => {
     console.log('🔌 Disconnecting from Google Calendar...');
-    gmailService.clearStoredTokens();
+    await gmailService.signOut();
     setGmailConnected(false);
     setGmailEmails([]);
     
@@ -950,7 +966,7 @@ const App: React.FC = () => {
       
       notificationService.showNotification(
         '✅ Sync Complete',
-        `Downloaded ${syncResult.downloaded.length} events, uploaded ${syncResult.uploaded.length} events.`,
+        `Downloaded ${syncResult.downloaded.length} events, uploaded ${syncResult.uploaded} events.`,
         { type: 'system' }
       );
       
@@ -1893,7 +1909,7 @@ const App: React.FC = () => {
           <CssBaseline />
           <div style={styles.dashboard}>
             <div style={styles.header}>
-              <div style={styles.headerTitle}>🚀 FlowGenius</div>
+              <div style={styles.headerTitle}>FlowGenius</div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                 <span>Welcome, {userProfile?.full_name || user?.email || 'User'}</span>
                 <button 
@@ -2382,7 +2398,7 @@ const App: React.FC = () => {
           <CssBaseline />
           <div style={styles.container}>
             <div style={styles.loginBox}>
-              <h1 style={styles.title}>🚀 FlowGenius</h1>
+              <h1 style={styles.title}>FlowGenius</h1>
               <p style={styles.subtitle}>Loading...</p>
             </div>
           </div>
@@ -2397,7 +2413,7 @@ const App: React.FC = () => {
         <CssBaseline />
         <div style={styles.container}>
           <div style={styles.loginBox}>
-            <h1 style={styles.title}>🚀 FlowGenius</h1>
+            <h1 style={styles.title}>FlowGenius</h1>
             <p style={styles.subtitle}>Your Productivity & Planning Companion</p>
             
             <div style={{ textAlign: 'center', padding: '20px' }}>
