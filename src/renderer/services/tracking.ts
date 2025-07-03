@@ -60,17 +60,22 @@ class AppTrackingService {
 
   constructor() {
     console.log('🔧 Initializing AppTrackingService...');
+    console.log('🔧 Window object available?', typeof window !== 'undefined');
+    console.log('🔧 ElectronAPI available?', !!(typeof window !== 'undefined' && window.electronAPI));
+    
     this.loadSettings();
     this.setupActivityDetection();
     
     // Delay real tracking setup to allow time for Electron API to be available
     setTimeout(() => {
+      console.log('⏰ Delayed tracking setup timeout fired');
       this.setupRealTracking();
       
       // FORCE start real tracking immediately if available
       if (this.isUsingRealTracking) {
         console.log('🚀 FORCE starting real app tracking in 1 second...');
         setTimeout(() => {
+          console.log('⏰ Auto-start timeout fired - starting tracking now');
           this.startTracking().catch(error => {
             console.error('❌ Failed to auto-start tracking:', error);
           });
@@ -82,15 +87,21 @@ class AppTrackingService {
   }
 
   private setupRealTracking(): void {
+    console.log('🔧 setupRealTracking() called');
+    console.log('🔧 typeof window:', typeof window);
+    console.log('🔧 window.electronAPI:', window.electronAPI);
+    
     // Check if we have access to electron API
     if (typeof window !== 'undefined' && window.electronAPI) {
       this.isUsingRealTracking = true;
       console.log('📊 Using real Windows app tracking');
+      console.log('📊 Available electronAPI methods:', Object.keys(window.electronAPI));
       
       // Clear any existing mock data on startup
       this.clearMockDataIfExists();
       
       // Listen for app usage sessions from main process
+      console.log('🎧 Setting up listener for app-usage-session events');
       window.electronAPI.onAppUsageSession((sessionData) => {
         console.log('📊 Received REAL app usage session:', sessionData);
         
@@ -103,8 +114,11 @@ class AppTrackingService {
         });
         this.saveUsageData(existingData);
       });
+      console.log('✅ Real tracking listener set up');
     } else {
       console.log('📊 Using mock app tracking (no Electron API available)');
+      console.log('🔧 Window undefined?', typeof window === 'undefined');
+      console.log('🔧 electronAPI undefined?', typeof window !== 'undefined' && !window.electronAPI);
       // Set a flag to indicate we're not in Electron environment
       this.isUsingRealTracking = false;
     }
@@ -209,42 +223,50 @@ class AppTrackingService {
   }
 
   public async startTracking(): Promise<void> {
-    console.log('🚀 startTracking() called');
-    console.log('📊 Settings enabled:', this.settings.enabled);
-    console.log('📊 Is using real tracking:', this.isUsingRealTracking);
-    console.log('📊 Has electronAPI:', !!(typeof window !== 'undefined' && window.electronAPI));
+    console.log('🚀 [RENDERER] startTracking() called');
+    console.log('📊 [RENDERER] Settings enabled:', this.settings.enabled);
+    console.log('📊 [RENDERER] Is using real tracking:', this.isUsingRealTracking);
+    console.log('📊 [RENDERER] Has electronAPI:', !!(typeof window !== 'undefined' && window.electronAPI));
+    console.log('📊 [RENDERER] Already tracking?', this.isTracking);
 
     if (!this.settings.enabled) {
-      console.log('⚠️ Tracking disabled in settings');
+      console.log('⚠️ [RENDERER] Tracking disabled in settings');
       return;
     }
 
     if (this.isTracking) {
-      console.log('⚠️ Already tracking - stopping first');
+      console.log('⚠️ [RENDERER] Already tracking - stopping first');
       await this.stopTracking();
     }
 
     this.isTracking = true;
-    console.log('✅ Started app usage tracking');
+    console.log('✅ [RENDERER] Started app usage tracking (flag set)');
 
     if (this.isUsingRealTracking && typeof window !== 'undefined' && window.electronAPI) {
       // Use ONLY real Windows app tracking - NO MOCK DATA
-      console.log('🔥 FORCING REAL Windows app tracking...');
+      console.log('🔥 [RENDERER] FORCING REAL Windows app tracking...');
       try {
+        console.log('📡 [RENDERER] Calling window.electronAPI.toggleAppTracking(true)...');
         const trackingEnabled = await window.electronAPI.toggleAppTracking(true);
-        console.log('✅ Real tracking enabled result:', trackingEnabled);
+        console.log('✅ [RENDERER] Real tracking enabled result:', trackingEnabled);
         
         // CRITICAL: Do NOT start any mock tracking intervals when using real tracking
-        console.log('🚫 Mock tracking disabled - using ONLY real Windows API data');
+        console.log('🚫 [RENDERER] Mock tracking disabled - using ONLY real Windows API data');
         
       } catch (error) {
-        console.error('❌ FAILED to enable real tracking:', error);
+        console.error('❌ [RENDERER] FAILED to enable real tracking:', error);
+        console.error('❌ [RENDERER] Error type:', error instanceof Error ? error.constructor.name : typeof error);
+        console.error('❌ [RENDERER] Error message:', error instanceof Error ? error.message : String(error));
+        console.error('❌ [RENDERER] Error stack:', error instanceof Error ? error.stack : 'No stack');
         this.isTracking = false;
         return;
       }
     } else {
       // Gracefully handle non-Electron environments
-      console.log('📊 Running in non-Electron environment - tracking service disabled');
+      console.log('📊 [RENDERER] Running in non-Electron environment - tracking service disabled');
+      console.log('🔧 [RENDERER] isUsingRealTracking:', this.isUsingRealTracking);
+      console.log('🔧 [RENDERER] window undefined?', typeof window === 'undefined');
+      console.log('🔧 [RENDERER] electronAPI undefined?', !window.electronAPI);
       this.isTracking = false;
       return;
     }

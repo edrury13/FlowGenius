@@ -3,13 +3,15 @@ import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
-  BarElement,
+  PointElement,
   LineElement,
+  BarElement,
   ArcElement,
   Title,
   Tooltip,
   Legend,
-  PointElement,
+  ChartOptions,
+  TooltipItem
 } from 'chart.js';
 import { Bar, Line, Doughnut } from 'react-chartjs-2';
 import trackingService, { ProductivityMetrics, TrackingSettings } from '../../services/tracking';
@@ -436,64 +438,83 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
                 </div>
               </div>
 
-              {/* Real Tracking Status */}
+              {/* Real App Tracking Status */}
               <div style={styles.card}>
                 <h3 style={styles.cardTitle}>🔍 Real App Tracking Status</h3>
-                <div style={styles.settingsGrid}>
-                  <div>
-                    <div style={styles.metric}>
-                      <span>Tracking Mode:</span>
-                      <span style={styles.metricValue}>
-                        {isUsingRealTracking ? '✅ Real Windows Tracking' : '🔧 Mock/Simulated'}
-                      </span>
-                    </div>
-                    {realTrackingStatus && (
-                      <>
-                        <div style={styles.metric}>
-                          <span>Is Tracking:</span>
-                          <span style={styles.metricValue}>
-                            {realTrackingStatus.isTracking ? '✅ Active' : '❌ Stopped'}
-                          </span>
-                        </div>
-                        <div style={styles.metric}>
-                          <span>Current App:</span>
-                          <span style={styles.metricValue}>
-                            {realTrackingStatus.currentApp ? 
-                              `${realTrackingStatus.currentApp.processName}` : 
-                              'None detected'}
-                          </span>
-                        </div>
-                        <div style={styles.metric}>
-                          <span>Running Apps:</span>
-                          <span style={styles.metricValue}>
-                            {realTrackingStatus.runningApps?.length || 0} detected
-                          </span>
-                        </div>
-                      </>
-                    )}
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={styles.metric}>
+                    <span>Tracking Service:</span>
+                    <span style={{...styles.metricValue, color: isUsingRealTracking ? '#10b981' : '#f59e0b'}}>
+                      {isUsingRealTracking ? 'Real Windows Tracking' : 'Mock Mode'}
+                    </span>
                   </div>
-                  <div>
-                    <button 
+                  
+                  <div style={styles.metric}>
+                    <span>Status:</span>
+                    <span style={{...styles.metricValue, color: realTrackingStatus?.isTracking ? '#10b981' : '#ef4444'}}>
+                      {realTrackingStatus?.isTracking ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                  
+                  <div style={styles.metric}>
+                    <span>Current App:</span>
+                    <span style={styles.metricValue}>
+                      {realTrackingStatus?.currentApp?.processName || 'None'}
+                    </span>
+                  </div>
+                  
+                  <div style={styles.metric}>
+                    <span>Running Apps:</span>
+                    <span style={styles.metricValue}>
+                      {realTrackingStatus?.runningApps?.length || 0} detected
+                    </span>
+                  </div>
+                  
+                  {/* Debug section */}
+                  <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e5e7eb' }}>
+                    <button
+                      onClick={async () => {
+                        console.log('🔍 Manual tracking status check...');
+                        try {
+                          const status = await trackingService.getRealTrackingStatus();
+                          console.log('📊 Real tracking status:', status);
+                          
+                          if (window.electronAPI) {
+                            const appData = await window.electronAPI.getAppUsageData();
+                            console.log('📊 App usage data from main:', appData);
+                          }
+                        } catch (error) {
+                          console.error('❌ Error checking tracking status:', error);
+                        }
+                      }}
                       style={{...styles.button, ...styles.primaryButton}}
-                      onClick={loadData}
                     >
-                      🔄 Refresh Status
+                      Debug: Check Tracking Status
                     </button>
-                    {isUsingRealTracking && (
-                      <button 
-                        style={{...styles.button, ...styles.dangerButton, marginTop: '8px'}}
-                        onClick={forceRestartRealTracking}
-                      >
-                        🔄 Restart Real Tracking
-                      </button>
-                    )}
-                    <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-                      {isUsingRealTracking ? 
-                        'Real tracking uses Windows APIs to detect actual app usage' :
-                        'Mock tracking generates simulated data for testing'
-                      }
-                    </div>
                   </div>
+                  
+                  {realTrackingStatus?.runningApps && realTrackingStatus.runningApps.length > 0 && (
+                    <div style={{ marginTop: '16px' }}>
+                      <h4 style={{ fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '8px' }}>
+                        Active Windows:
+                      </h4>
+                      <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                        {realTrackingStatus.runningApps.slice(0, 5).map((app: any, index: number) => (
+                          <li key={index} style={{ 
+                            fontSize: '12px', 
+                            color: '#6b7280', 
+                            marginBottom: '4px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {app.processName}: {app.windowTitle}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               </div>
 

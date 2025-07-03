@@ -63,41 +63,69 @@ class WindowsAppTracker {
 
   constructor() {
     console.log('🔍 Windows App Tracker initialized');
+    console.log('🔍 Running on platform:', process.platform);
+    console.log('🔍 Node version:', process.version);
   }
 
   public async startTracking(): Promise<void> {
-    if (this.isTracking) return;
+    console.log('📊 [TRACKING] startTracking() called');
+    console.log('📊 [TRACKING] Current tracking state:', this.isTracking);
+    
+    if (this.isTracking) {
+      console.log('⚠️ [TRACKING] Already tracking, returning early');
+      return;
+    }
     
     try {
+      console.log('🧪 [TRACKING] Testing PowerShell access...');
       // Test if we can run PowerShell commands
       await this.testPowerShellAccess();
+      console.log('✅ [TRACKING] PowerShell test passed');
       
       this.isTracking = true;
-      console.log('📊 Starting real Windows app tracking...');
+      console.log('📊 [TRACKING] Starting real Windows app tracking...');
       
       // Get initial active window
+      console.log('🔍 [TRACKING] Getting initial active window...');
       await this.updateActiveWindow();
+      console.log('✅ [TRACKING] Initial window capture completed');
       
       // Check for active window changes every 5 seconds
       this.trackingInterval = setInterval(async () => {
+        console.log('⏰ [TRACKING] Interval tick - checking active window...');
         await this.updateActiveWindow();
       }, 5000);
+      
+      console.log('✅ [TRACKING] Tracking started successfully with 5s interval');
     } catch (error) {
-      console.error('❌ Failed to start tracking:', error);
+      console.error('❌ [TRACKING] Failed to start tracking:', error);
+      console.error('❌ [TRACKING] Error type:', error instanceof Error ? error.constructor.name : typeof error);
+      console.error('❌ [TRACKING] Error message:', error instanceof Error ? error.message : String(error));
+      console.error('❌ [TRACKING] Error stack:', error instanceof Error ? error.stack : 'No stack trace');
       this.handleTrackingError(error);
     }
   }
 
   private async testPowerShellAccess(): Promise<void> {
     try {
+      console.log('🧪 [POWERSHELL] Running test command...');
       // Simple test command to check PowerShell access
-      const { stdout } = await execAsync('powershell -Command "echo test"');
+      const { stdout, stderr } = await execAsync('powershell -Command "echo test"');
+      console.log('🧪 [POWERSHELL] Test stdout:', stdout);
+      console.log('🧪 [POWERSHELL] Test stderr:', stderr);
+      
       if (!stdout.includes('test')) {
-        throw new Error('PowerShell test failed');
+        throw new Error('PowerShell test failed - unexpected output');
       }
-      console.log('✅ PowerShell access confirmed');
+      console.log('✅ [POWERSHELL] PowerShell access confirmed');
     } catch (error) {
-      console.error('❌ PowerShell access test failed:', error);
+      console.error('❌ [POWERSHELL] PowerShell access test failed:', error);
+      console.error('❌ [POWERSHELL] Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        code: (error as any).code,
+        stdout: (error as any).stdout,
+        stderr: (error as any).stderr
+      });
       throw new Error('Cannot access PowerShell. Tracking features may not work.');
     }
   }
@@ -143,88 +171,119 @@ class WindowsAppTracker {
   }
 
   private async updateActiveWindow(): Promise<void> {
+    console.log('🔄 [UPDATE] updateActiveWindow() called');
     try {
       const activeWindow = await this.getActiveWindow();
+      console.log('🔍 [UPDATE] Active window result:', activeWindow);
       
-      if (!activeWindow) return;
+      if (!activeWindow) {
+        console.log('⚠️ [UPDATE] No active window returned');
+        return;
+      }
       
       // Check if this is a different app/window
       const isDifferent = !this.currentActiveApp ||
         this.currentActiveApp.processName !== activeWindow.processName ||
         this.currentActiveApp.windowTitle !== activeWindow.windowTitle;
       
+      console.log('🔍 [UPDATE] Is different window?', isDifferent);
+      
       if (isDifferent) {
         // End previous session
         if (this.currentSession) {
+          console.log('⏹️ [UPDATE] Ending previous session');
           this.endCurrentSession();
         }
         
         // Start new session
+        console.log('▶️ [UPDATE] Starting new session');
         this.startNewSession(activeWindow);
         this.currentActiveApp = activeWindow;
         
-        console.log(`🎯 Active: ${activeWindow.processName} - ${activeWindow.windowTitle}`);
-        console.log(`🔍 RAW Process Name: "${activeWindow.processName}"`);
-        console.log(`🔍 Formatted App Name: "${this.formatAppName(activeWindow.processName)}"`);
+        console.log(`🎯 [UPDATE] Active: ${activeWindow.processName} - ${activeWindow.windowTitle}`);
+        console.log(`🔍 [UPDATE] RAW Process Name: "${activeWindow.processName}"`);
+        console.log(`🔍 [UPDATE] Formatted App Name: "${this.formatAppName(activeWindow.processName)}"`);
       }
     } catch (error) {
-      console.error('Error updating active window:', error);
+      console.error('❌ [UPDATE] Error updating active window:', error);
+      console.error('❌ [UPDATE] Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        type: error instanceof Error ? error.constructor.name : typeof error,
+        stack: error instanceof Error ? error.stack : undefined
+      });
     }
   }
 
   private async getActiveWindow(): Promise<WindowInfo | null> {
+    console.log('🪟 [GET_WINDOW] getActiveWindow() called');
+    
+    // Start with the simpler method that we know works
     try {
-      // PowerShell script to get active window info
-      const script = `
-        Add-Type @"
-          using System;
-          using System.Runtime.InteropServices;
-          using System.Text;
-          public class Win32 {
-            [DllImport("user32.dll")]
-            public static extern IntPtr GetForegroundWindow();
-            [DllImport("user32.dll")]
-            public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-            [DllImport("user32.dll")]
-            public static extern int GetWindowThreadProcessId(IntPtr hWnd, out int lpdwProcessId);
-          }
-"@
-        
-        $hwnd = [Win32]::GetForegroundWindow()
-        if ($hwnd -eq [IntPtr]::Zero) { exit }
-        
-        $sb = New-Object System.Text.StringBuilder 256
-        [Win32]::GetWindowText($hwnd, $sb, $sb.Capacity) | Out-Null
-        $windowTitle = $sb.ToString()
-        
-        $processId = 0
-        [Win32]::GetWindowThreadProcessId($hwnd, [ref]$processId) | Out-Null
-        
-        $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
-        if ($process) {
-          $result = @{
-            ProcessName = $process.ProcessName.ToLower()
-            WindowTitle = $windowTitle
-            ProcessId = $processId
-          }
-          $result | ConvertTo-Json -Compress
-        }
-      `;
+      // Get the foreground window using a simpler approach
+      const command = `powershell -ExecutionPolicy Bypass -NoProfile -Command "Get-Process | Where-Object {$_.MainWindowHandle -ne 0} | Where-Object {$_.MainWindowTitle -ne ''} | Where-Object {$_.MainWindowHandle -eq (Add-Type '[DllImport(\\\"user32.dll\\\")] public static extern IntPtr GetForegroundWindow();' -Name Win32 -PassThru)::GetForegroundWindow()} | Select-Object ProcessName, MainWindowTitle, Id | ConvertTo-Json -Compress"`;
       
-      const { stdout } = await execAsync(`powershell -Command "${script}"`);
+      console.log('🪟 [GET_WINDOW] Trying optimized PowerShell command...');
+      const { stdout, stderr } = await execAsync(command, {
+        windowsHide: true,
+        timeout: 3000
+      });
       
-      if (!stdout.trim()) return null;
-      
-      const data = JSON.parse(stdout.trim());
-      
-      return {
-        processName: data.ProcessName,
-        windowTitle: data.WindowTitle,
-        processId: data.ProcessId,
-        isActive: true
-      };
+      if (stdout.trim()) {
+        const data = JSON.parse(stdout.trim());
+        console.log('✅ [GET_WINDOW] Got active window:', data);
+        
+        return {
+          processName: data.ProcessName.toLowerCase(),
+          windowTitle: data.MainWindowTitle,
+          processId: data.Id,
+          isActive: true
+        };
+      }
     } catch (error) {
-      console.error('Error getting active window:', error);
+      console.log('⚠️ [GET_WINDOW] Optimized method failed, trying simple fallback...');
+    }
+    
+    // Fallback: Just get the first process with a window title
+    // This is less accurate but more reliable
+    try {
+      const simpleCommand = `powershell -ExecutionPolicy Bypass -NoProfile -Command "Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object -First 1 ProcessName, MainWindowTitle, Id | ConvertTo-Json -Compress"`;
+      
+      const { stdout, stderr } = await execAsync(simpleCommand, {
+        windowsHide: true,
+        timeout: 3000
+      });
+      
+      console.log('🪟 [FALLBACK] PowerShell stdout:', stdout ? stdout.substring(0, 200) : 'Empty');
+      console.log('🪟 [FALLBACK] PowerShell stderr:', stderr);
+      
+      if (!stdout.trim()) {
+        console.log('⚠️ [FALLBACK] No output from PowerShell');
+        return null;
+      }
+      
+      try {
+        const data = JSON.parse(stdout.trim());
+        console.log('🪟 [FALLBACK] Parsed window data:', data);
+        
+        return {
+          processName: data.ProcessName.toLowerCase(),
+          windowTitle: data.MainWindowTitle,
+          processId: data.Id,
+          isActive: true
+        };
+      } catch (parseError) {
+        console.error('❌ [FALLBACK] Failed to parse JSON:', parseError);
+        console.error('❌ [FALLBACK] Raw output was:', stdout);
+        return null;
+      }
+    } catch (error) {
+      console.error('❌ [FALLBACK] Error getting active window:', error);
+      console.error('❌ [FALLBACK] Error details:', {
+        message: error instanceof Error ? error.message : String(error),
+        code: (error as any).code,
+        stdout: (error as any).stdout,
+        stderr: (error as any).stderr
+      });
       return null;
     }
   }
@@ -322,24 +381,33 @@ class WindowsAppTracker {
 
   public async getRunningApps(): Promise<WindowInfo[]> {
     try {
-      const script = `
-        Get-Process | Where-Object { $_.MainWindowTitle -ne "" } | ForEach-Object {
-          @{
-            ProcessName = $_.ProcessName.ToLower()
-            WindowTitle = $_.MainWindowTitle
-            ProcessId = $_.Id
-          }
-        } | ConvertTo-Json
-      `;
+      // This command works well based on our test
+      const command = `powershell -ExecutionPolicy Bypass -NoProfile -Command "Get-Process | Where-Object { $_.MainWindowTitle -ne '' } | ForEach-Object { @{ ProcessName = $_.ProcessName.ToLower(); WindowTitle = $_.MainWindowTitle; ProcessId = $_.Id } } | ConvertTo-Json"`;
       
-      const { stdout } = await execAsync(`powershell -Command "${script}"`);
+      console.log('📊 [GET_APPS] Getting running apps...');
+      const { stdout, stderr } = await execAsync(command, {
+        windowsHide: true,
+        timeout: 5000
+      });
       
-      if (!stdout.trim()) return [];
+      if (!stdout.trim()) {
+        console.log('⚠️ [GET_APPS] No running apps found');
+        return [];
+      }
       
       const data = JSON.parse(stdout.trim());
-      return Array.isArray(data) ? data : [data];
+      const apps = Array.isArray(data) ? data : [data];
+      console.log(`✅ [GET_APPS] Found ${apps.length} running apps`);
+      
+      // Map the property names correctly
+      return apps.map(app => ({
+        processName: app.ProcessName || app.processName,
+        windowTitle: app.WindowTitle || app.windowTitle || app.MainWindowTitle,
+        processId: app.ProcessId || app.Id || app.processId,
+        isActive: false
+      }));
     } catch (error) {
-      console.error('Error getting running apps:', error);
+      console.error('❌ [GET_APPS] Error getting running apps:', error);
       return [];
     }
   }
