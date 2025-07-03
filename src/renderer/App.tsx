@@ -24,7 +24,7 @@ import {
 } from './store/aiAssistantSlice';
 import type { RootState } from './store';
 import dayjs from 'dayjs';
-import { loadGoogleMaps } from './services/location';
+import { loadGoogleMaps, locationService } from './services/location';
 
 interface Event {
   id: string;
@@ -249,6 +249,9 @@ const App: React.FC = () => {
     loadGoogleMaps().catch(error => {
       console.error('Failed to load Google Maps:', error);
     });
+    
+    // Expose locationService to window for debugging
+    (window as any).locationService = locationService;
   }, []); // Empty dependency array ensures this runs only once
 
   // Initialize services and setup auth listener

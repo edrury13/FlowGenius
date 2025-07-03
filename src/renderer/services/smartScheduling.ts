@@ -471,7 +471,115 @@ class SmartSchedulingService {
   }
 
   /**
-   * Enhance time slot suggestions with location recommendations
+   * Get user's location from browser or return default
+   */
+  private async getUserLocation(): Promise<{ lat: number; lng: number }> {
+    try {
+      // Check if we have a cached location that's less than 24 hours old
+      const cachedLocation = localStorage.getItem('userLocation');
+      const locationTimestamp = localStorage.getItem('userLocationTimestamp');
+      
+      if (cachedLocation && locationTimestamp) {
+        const timestamp = parseInt(locationTimestamp);
+        const now = Date.now();
+        const twentyFourHours = 24 * 60 * 60 * 1000;
+        
+        if (now - timestamp < twentyFourHours) {
+          const location = JSON.parse(cachedLocation);
+          console.log('Using cached user location:', location);
+          return location;
+        }
+      }
+      
+      // Try IP-based geolocation first (doesn't require permissions)
+      try {
+        console.log('Attempting IP-based geolocation...');
+        const ipResponse = await fetch('https://ipapi.co/json/');
+        if (ipResponse.ok) {
+          const ipData = await ipResponse.json();
+          if (ipData.latitude && ipData.longitude) {
+            const location = {
+              lat: ipData.latitude,
+              lng: ipData.longitude
+            };
+            console.log(`Got location from IP (${ipData.city}, ${ipData.region}, ${ipData.country_name}):`, location);
+            
+            // Cache the location
+            localStorage.setItem('userLocation', JSON.stringify(location));
+            localStorage.setItem('userLocationTimestamp', Date.now().toString());
+            
+            return location;
+          }
+        }
+      } catch (ipError) {
+        console.warn('IP geolocation failed:', ipError);
+      }
+      
+      // Try browser geolocation as fallback (with high accuracy disabled to avoid Google)
+      try {
+        if (navigator.geolocation) {
+          console.log('Attempting browser geolocation...');
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+              (position) => resolve(position),
+              (error) => reject(error),
+              { 
+                timeout: 10000, 
+                enableHighAccuracy: false, // This avoids using Google's network provider
+                maximumAge: 3600000 // Accept cached positions up to 1 hour old
+              }
+            );
+          });
+          
+          const location = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+          console.log('Got location from browser:', location);
+          
+          // Cache the location
+          localStorage.setItem('userLocation', JSON.stringify(location));
+          localStorage.setItem('userLocationTimestamp', Date.now().toString());
+          
+          return location;
+        }
+      } catch (geoError) {
+        console.warn('Browser geolocation failed:', geoError);
+      }
+      
+      // Final fallback: Use a default based on timezone
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      console.log('Using timezone-based fallback:', timezone);
+      
+      // Common timezone to location mapping
+      const timezoneLocations: Record<string, { lat: number; lng: number }> = {
+        'America/New_York': { lat: 40.7128, lng: -74.0060 },
+        'America/Chicago': { lat: 41.8781, lng: -87.6298 },
+        'America/Denver': { lat: 39.7392, lng: -104.9903 },
+        'America/Los_Angeles': { lat: 34.0522, lng: -118.2437 },
+        'America/Phoenix': { lat: 33.4484, lng: -112.0740 },
+        'America/Toronto': { lat: 43.6532, lng: -79.3832 },
+        'Europe/London': { lat: 51.5074, lng: -0.1278 },
+        'Europe/Paris': { lat: 48.8566, lng: 2.3522 },
+        'Europe/Berlin': { lat: 52.5200, lng: 13.4050 },
+        'Asia/Tokyo': { lat: 35.6762, lng: 139.6503 },
+        'Asia/Shanghai': { lat: 31.2304, lng: 121.4737 },
+        'Asia/Kolkata': { lat: 19.0760, lng: 72.8777 },
+        'Australia/Sydney': { lat: -33.8688, lng: 151.2093 },
+        'Australia/Melbourne': { lat: -37.8136, lng: 144.9631 }
+      };
+      
+      return timezoneLocations[timezone] || { lat: 40.7128, lng: -74.0060 }; // Default to NY
+      
+    } catch (error) {
+      console.error('Failed to get user location:', error);
+      // Default to New York
+      return { lat: 40.7128, lng: -74.0060 };
+    }
+  }
+
+  /**
+   * Enhance scheduling result with location suggestions
    */
   private async enhanceWithLocationSuggestions(
     timeSlots: TimeSlotSuggestion[],
@@ -479,52 +587,85 @@ class SmartSchedulingService {
     classification: EventClassification
   ): Promise<TimeSlotSuggestion[]> {
     try {
-      // Get user's current location or default to a central location
-      const defaultLocation = { lat: 37.7749, lng: -122.4194 }; // San Francisco as default
+      // Get user's current location
+      const userLocation = await this.getUserLocation();
+      console.log('Using user location for suggestions:', userLocation);
       
-      // Map classification to event type for location search
-      const eventTypeMap: Record<string, string> = {
-        business: 'meeting',
-        hobby: eventTitle.toLowerCase().includes('gym') || eventTitle.toLowerCase().includes('workout') ? 'workout' : 'entertainment',
-        personal: eventTitle.toLowerCase().includes('lunch') || eventTitle.toLowerCase().includes('dinner') ? 'dinner' : 'shopping'
-      };
+      // Extract event type from classification
+      const eventType = this.extractEventType(classification.type, eventTitle);
       
-      const eventType = eventTypeMap[classification.type] || 'meeting';
-      
-      // Get location suggestions
+      // Get location suggestions based on event type
       const locationSuggestions = await locationService.getSuggestedLocations(
-        defaultLocation,
+        userLocation,
         eventType,
         5000 // 5km radius
       );
       
-      // Convert suggestions to EventLocation format
-      const locations: EventLocation[] = await Promise.all(
+      // Convert to EventLocation format
+      const locations = await Promise.all(
         locationSuggestions.slice(0, 3).map(async (suggestion) => {
           try {
             const details = await locationService.getPlaceDetails(suggestion.placeId);
             return details.location;
           } catch (error) {
-            // Fallback if details fetch fails
+            console.error('Error getting place details:', error);
+            // Fallback to basic location info
             return {
               name: suggestion.mainText,
               address: suggestion.secondaryText,
               placeId: suggestion.placeId,
               type: suggestion.types[0]
-            };
+            } as EventLocation;
           }
         })
       );
       
-      // Add location suggestions to each time slot
-      return timeSlots.map(slot => ({
+      // Add locations to each time slot
+      const enhancedSlots = timeSlots.map(slot => ({
         ...slot,
         locationSuggestions: locations
       }));
+      
+      return enhancedSlots;
     } catch (error) {
       console.error('Error enhancing with location suggestions:', error);
-      // Return original slots if location enhancement fails
+      // Return original slots if enhancement fails
       return timeSlots;
+    }
+  }
+
+  /**
+   * Extract event type from classification
+   */
+  private extractEventType(classificationType: string, eventTitle: string): string {
+    const lowerTitle = eventTitle.toLowerCase();
+    
+    // Check for specific event types based on title
+    if (lowerTitle.includes('lunch') || lowerTitle.includes('dinner') || 
+        lowerTitle.includes('breakfast') || lowerTitle.includes('meal')) {
+      return 'dinner'; // Using 'dinner' for all meal types
+    }
+    if (lowerTitle.includes('coffee')) {
+      return 'coffee';
+    }
+    if (lowerTitle.includes('gym') || lowerTitle.includes('workout') || 
+        lowerTitle.includes('exercise')) {
+      return 'workout';
+    }
+    if (lowerTitle.includes('shopping')) {
+      return 'shopping';
+    }
+    
+    // Default based on classification type
+    switch (classificationType) {
+      case 'business':
+        return 'meeting';
+      case 'hobby':
+        return 'entertainment';
+      case 'personal':
+        return 'meeting';
+      default:
+        return 'meeting';
     }
   }
 }

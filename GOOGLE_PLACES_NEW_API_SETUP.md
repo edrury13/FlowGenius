@@ -139,13 +139,31 @@ The new API uses field masks to control costs:
    - Error: "CORS policy blocked..."
    - Solution: API key should work from Electron apps, but check domain restrictions
 
-### Debugging
+### 403 Permission Denied Error
 
-Enable verbose logging by checking console output:
+If you see a 403 error about the Places API (New) not being enabled:
 
-```javascript
-console.log('[LocationService] Places API error:', error);
-```
+1. Go to the [Google Cloud Console](https://console.cloud.google.com)
+2. Enable the **"Places API (New)"** - this is different from the legacy Places API
+3. Check your API key restrictions - ensure "Places API (New)" is included
+4. Wait 5-10 minutes for the changes to propagate
+
+### 400 Invalid Place Type Error
+
+If you see errors like `Invalid included_primary_types 'coworking_space'`:
+
+This means you're using place types that aren't supported in the new API. Valid place types include:
+- `restaurant`, `cafe`, `bar`, `night_club` (for dining)
+- `gym`, `sports_complex` (for fitness)
+- `shopping_mall`, `department_store`, `clothing_store`, `supermarket` (for shopping)
+- `movie_theater`, `museum`, `tourist_attraction`, `amusement_park` (for entertainment)
+- `corporate_office` (for meetings)
+
+See the full list at: https://developers.google.com/maps/documentation/places/web-service/place-types
+
+### Static Fallback
+
+If the API fails for any reason, the app will automatically fall back to curated static location suggestions to ensure the feature continues working.
 
 ## Migration Notes
 
