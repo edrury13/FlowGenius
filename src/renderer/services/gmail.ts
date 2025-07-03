@@ -130,7 +130,7 @@ class GmailService {
 
       // Store tokens securely
       localStorage.setItem('googleTokens', JSON.stringify(tokens));
-      localStorage.setItem('gmailConnected', 'true');
+        localStorage.setItem('gmailConnected', 'true');
       
       this.isConnected = true;
       console.log('✅ Google authentication successful');

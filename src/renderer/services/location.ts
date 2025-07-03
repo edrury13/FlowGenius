@@ -7,9 +7,45 @@ declare global {
   }
 }
 
+// New Places API types
+interface PlacePrediction {
+  place: string;
+  placeId: string;
+  text: {
+    text: string;
+    matches?: Array<{
+      startOffset: number;
+      endOffset: number;
+    }>;
+  };
+  structuredFormat?: {
+    mainText: {
+      text: string;
+      matches?: Array<{
+        startOffset: number;
+        endOffset: number;
+      }>;
+    };
+    secondaryText?: {
+      text: string;
+      matches?: Array<{
+        startOffset: number;
+        endOffset: number;
+      }>;
+    };
+  };
+  types?: string[];
+}
+
+interface AutocompleteResponse {
+  suggestions?: Array<{
+    placePrediction: PlacePrediction;
+  }>;
+}
+
 // Initialize Google Maps
-let autocompleteService: google.maps.places.AutocompleteService | null = null;
 let geocoder: google.maps.Geocoder | null = null;
+let placesService: google.maps.places.PlacesService | null = null;
 let mapsLoaded = false;
 let loadingPromise: Promise<void> | null = null;
 
@@ -81,9 +117,11 @@ export const loadGoogleMaps = async (): Promise<void> => {
 // Initialize Google Maps services
 const initializeServices = () => {
   if (!window.google) return;
-
-  autocompleteService = new window.google.maps.places.AutocompleteService();
+  
   geocoder = new window.google.maps.Geocoder();
+  // Create a dummy map element for PlacesService
+  const dummyMap = new window.google.maps.Map(document.createElement('div'));
+  placesService = new window.google.maps.places.PlacesService(dummyMap);
 };
 
 // Location service interface
@@ -106,102 +144,229 @@ export interface LocationDetails {
   website?: string;
 }
 
+// New Places API Autocomplete function
+async function callPlacesAutocomplete(input: string, types?: string[]): Promise<AutocompleteResponse> {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) {
+    throw new Error('Google API key not configured');
+  }
+
+  const url = 'https://places.googleapis.com/v1/places:autocomplete';
+  
+  const requestBody: any = {
+    input,
+    // Add location bias for San Francisco Bay Area
+    locationBias: {
+      circle: {
+        center: {
+          latitude: 37.7749,
+          longitude: -122.4194
+        },
+        radius: 50000.0 // 50km radius
+      }
+    }
+  };
+
+  // Add type filters if specified
+  if (types && types.length > 0) {
+    requestBody.includedPrimaryTypes = types;
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'suggestions.placePrediction.place,suggestions.placePrediction.placeId,suggestions.placePrediction.text,suggestions.placePrediction.structuredFormat,suggestions.placePrediction.types'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('[LocationService] Places API error:', error);
+      throw new Error(`Places API error: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('[LocationService] Autocomplete request failed:', error);
+    throw error;
+  }
+}
+
+// Get place types based on event type
+function getPlaceTypesForEvent(eventType: string): string[] {
+  const typeMap: Record<string, string[]> = {
+    lunch: ['restaurant', 'cafe', 'fast_food_restaurant', 'bakery'],
+    dinner: ['restaurant', 'bar', 'night_club'],
+    coffee: ['cafe', 'coffee_shop', 'bakery'],
+    meeting: ['cafe', 'restaurant', 'coworking_space'],
+    workout: ['gym', 'fitness_center', 'sports_club'],
+    shopping: ['shopping_mall', 'department_store', 'clothing_store', 'supermarket'],
+    entertainment: ['movie_theater', 'museum', 'tourist_attraction', 'amusement_park']
+  };
+
+  return typeMap[eventType.toLowerCase()] || ['establishment'];
+}
+
+// Fallback static suggestions
+const getStaticSuggestions = (eventType: string): LocationSuggestion[] => {
+  const staticSuggestions: Record<string, LocationSuggestion[]> = {
+    lunch: [
+      { placeId: 'lunch1', mainText: 'The French Laundry', secondaryText: '6640 Washington St, Yountville, CA', types: ['restaurant'] },
+      { placeId: 'lunch2', mainText: 'Chez Panisse', secondaryText: '1517 Shattuck Ave, Berkeley, CA', types: ['restaurant'] },
+      { placeId: 'lunch3', mainText: 'Sweetgreen', secondaryText: '2 Embarcadero Center, San Francisco, CA', types: ['restaurant', 'healthy'] },
+    ],
+    dinner: [
+      { placeId: 'dinner1', mainText: 'Gary Danko', secondaryText: '800 N Point St, San Francisco, CA', types: ['restaurant', 'fine_dining'] },
+      { placeId: 'dinner2', mainText: 'House of Prime Rib', secondaryText: '1906 Van Ness Ave, San Francisco, CA', types: ['restaurant'] },
+      { placeId: 'dinner3', mainText: 'Atelier Crenn', secondaryText: '3127 Fillmore St, San Francisco, CA', types: ['restaurant', 'fine_dining'] },
+    ],
+    coffee: [
+      { placeId: 'coffee1', mainText: 'Blue Bottle Coffee', secondaryText: '66 Mint St, San Francisco, CA', types: ['cafe', 'coffee_shop'] },
+      { placeId: 'coffee2', mainText: 'Philz Coffee', secondaryText: '549 Castro St, San Francisco, CA', types: ['cafe', 'coffee_shop'] },
+      { placeId: 'coffee3', mainText: 'Ritual Coffee Roasters', secondaryText: '1026 Valencia St, San Francisco, CA', types: ['cafe', 'coffee_shop'] },
+    ],
+    meeting: [
+      { placeId: 'meeting1', mainText: 'WeWork Salesforce Tower', secondaryText: '415 Mission St, San Francisco, CA', types: ['coworking_space'] },
+      { placeId: 'meeting2', mainText: 'The St. Regis San Francisco', secondaryText: '125 3rd St, San Francisco, CA', types: ['hotel', 'meeting_space'] },
+      { placeId: 'meeting3', mainText: 'Soho House', secondaryText: '1812 Telegraph Ave, Oakland, CA', types: ['club', 'meeting_space'] },
+    ],
+    workout: [
+      { placeId: 'gym1', mainText: 'Equinox Sports Club', secondaryText: '747 Market St, San Francisco, CA', types: ['gym'] },
+      { placeId: 'gym2', mainText: 'Barry\'s Bootcamp', secondaryText: '2368 Fillmore St, San Francisco, CA', types: ['gym', 'fitness'] },
+      { placeId: 'gym3', mainText: 'CrossFit Golden Gate', secondaryText: '1410 Fillmore St, San Francisco, CA', types: ['gym', 'crossfit'] },
+    ],
+    shopping: [
+      { placeId: 'shop1', mainText: 'Westfield San Francisco Centre', secondaryText: '865 Market St, San Francisco, CA', types: ['shopping_mall'] },
+      { placeId: 'shop2', mainText: 'Union Square', secondaryText: 'Union Square, San Francisco, CA', types: ['shopping_area'] },
+      { placeId: 'shop3', mainText: 'Ferry Building Marketplace', secondaryText: '1 Ferry Building, San Francisco, CA', types: ['shopping_mall', 'food'] },
+    ],
+    entertainment: [
+      { placeId: 'ent1', mainText: 'AMC Metreon 16', secondaryText: '135 4th St, San Francisco, CA', types: ['movie_theater'] },
+      { placeId: 'ent2', mainText: 'San Francisco Museum of Modern Art', secondaryText: '151 3rd St, San Francisco, CA', types: ['museum'] },
+      { placeId: 'ent3', mainText: 'The Fillmore', secondaryText: '1805 Geary Blvd, San Francisco, CA', types: ['music_venue'] },
+    ],
+  };
+  
+  return staticSuggestions[eventType.toLowerCase()] || staticSuggestions['meeting'];
+};
+
 // Location service
 export const locationService = {
   // Search for location suggestions
   async searchLocations(input: string): Promise<LocationSuggestion[]> {
-    if (!autocompleteService) {
-      await loadGoogleMaps();
-    }
-
-    return new Promise((resolve, reject) => {
-      if (!autocompleteService) {
-        reject(new Error('Autocomplete service not initialized'));
-        return;
+    try {
+      const response = await callPlacesAutocomplete(input);
+      
+      if (response.suggestions) {
+        return response.suggestions.map(suggestion => {
+          const prediction = suggestion.placePrediction;
+          return {
+            placeId: prediction.placeId,
+            mainText: prediction.structuredFormat?.mainText?.text || prediction.text.text,
+            secondaryText: prediction.structuredFormat?.secondaryText?.text || '',
+            types: prediction.types || ['establishment']
+          };
+        });
       }
-
-      const request: google.maps.places.AutocompletionRequest = {
-        input,
-        types: ['establishment', 'geocode'],
-      };
-
-      autocompleteService.getPlacePredictions(request, (predictions, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
-          const suggestions: LocationSuggestion[] = predictions.map(prediction => ({
-            placeId: prediction.place_id,
-            mainText: prediction.structured_formatting.main_text,
-            secondaryText: prediction.structured_formatting.secondary_text || '',
-            types: prediction.types || [],
-          }));
-          resolve(suggestions);
-        } else if (status === google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
-          resolve([]);
-        } else {
-          reject(new Error(`Places API error: ${status}`));
-        }
-      });
-    });
+      
+      return [];
+    } catch (error) {
+      console.error('[LocationService] Search failed, using fallback:', error);
+      // Return some default suggestions as fallback
+      return getStaticSuggestions('meeting').slice(0, 3);
+    }
   },
 
   // Get detailed information about a place
   async getPlaceDetails(placeId: string): Promise<LocationDetails> {
     console.log('[LocationService] getPlaceDetails called for:', placeId);
     
-    // Since we're using static data, we'll return details based on the placeId
-    // In a real implementation, this would call the new Google Places API
+    // First check if this is a static place ID
+    const allStaticSuggestions = Object.values({
+      lunch: getStaticSuggestions('lunch'),
+      dinner: getStaticSuggestions('dinner'),
+      coffee: getStaticSuggestions('coffee'),
+      meeting: getStaticSuggestions('meeting'),
+      workout: getStaticSuggestions('workout'),
+      shopping: getStaticSuggestions('shopping'),
+      entertainment: getStaticSuggestions('entertainment'),
+    }).flat();
     
-    const allSuggestions: LocationSuggestion[] = [
-      // Lunch places
-      { placeId: 'lunch1', mainText: 'The French Laundry', secondaryText: '6640 Washington St, Yountville, CA', types: ['restaurant'] },
-      { placeId: 'lunch2', mainText: 'Chez Panisse', secondaryText: '1517 Shattuck Ave, Berkeley, CA', types: ['restaurant'] },
-      { placeId: 'lunch3', mainText: 'Sweetgreen', secondaryText: '2 Embarcadero Center, San Francisco, CA', types: ['restaurant', 'healthy'] },
-      // Dinner places
-      { placeId: 'dinner1', mainText: 'Gary Danko', secondaryText: '800 N Point St, San Francisco, CA', types: ['restaurant', 'fine_dining'] },
-      { placeId: 'dinner2', mainText: 'House of Prime Rib', secondaryText: '1906 Van Ness Ave, San Francisco, CA', types: ['restaurant'] },
-      { placeId: 'dinner3', mainText: 'Atelier Crenn', secondaryText: '3127 Fillmore St, San Francisco, CA', types: ['restaurant', 'fine_dining'] },
-      // Coffee places
-      { placeId: 'coffee1', mainText: 'Blue Bottle Coffee', secondaryText: '66 Mint St, San Francisco, CA', types: ['cafe', 'coffee_shop'] },
-      { placeId: 'coffee2', mainText: 'Philz Coffee', secondaryText: '549 Castro St, San Francisco, CA', types: ['cafe', 'coffee_shop'] },
-      { placeId: 'coffee3', mainText: 'Ritual Coffee Roasters', secondaryText: '1026 Valencia St, San Francisco, CA', types: ['cafe', 'coffee_shop'] },
-      // Meeting places
-      { placeId: 'meeting1', mainText: 'WeWork Salesforce Tower', secondaryText: '415 Mission St, San Francisco, CA', types: ['coworking_space'] },
-      { placeId: 'meeting2', mainText: 'The St. Regis San Francisco', secondaryText: '125 3rd St, San Francisco, CA', types: ['hotel', 'meeting_space'] },
-      { placeId: 'meeting3', mainText: 'Soho House', secondaryText: '1812 Telegraph Ave, Oakland, CA', types: ['club', 'meeting_space'] },
-      // Workout places
-      { placeId: 'gym1', mainText: 'Equinox Sports Club', secondaryText: '747 Market St, San Francisco, CA', types: ['gym'] },
-      { placeId: 'gym2', mainText: 'Barry\'s Bootcamp', secondaryText: '2368 Fillmore St, San Francisco, CA', types: ['gym', 'fitness'] },
-      { placeId: 'gym3', mainText: 'CrossFit Golden Gate', secondaryText: '1410 Fillmore St, San Francisco, CA', types: ['gym', 'crossfit'] },
-    ];
+    const staticSuggestion = allStaticSuggestions.find(s => s.placeId === placeId);
     
-    const suggestion = allSuggestions.find(s => s.placeId === placeId);
-    
-    if (!suggestion) {
-      throw new Error(`Place not found: ${placeId}`);
+    if (staticSuggestion) {
+      const location: EventLocation = {
+        name: staticSuggestion.mainText,
+        address: staticSuggestion.secondaryText,
+        placeId: placeId,
+        coordinates: {
+          lat: 37.7749, // Default SF coordinates
+          lng: -122.4194,
+        },
+        type: staticSuggestion.types?.[0],
+        url: `https://www.google.com/maps/search/${encodeURIComponent(staticSuggestion.mainText + ' ' + staticSuggestion.secondaryText)}`,
+      };
+
+      return {
+        location,
+        openingHours: undefined,
+        rating: undefined,
+        priceLevel: undefined,
+        phoneNumber: undefined,
+        website: undefined,
+      };
     }
     
-    const location: EventLocation = {
-      name: suggestion.mainText,
-      address: suggestion.secondaryText,
-      placeId: placeId,
-      coordinates: {
-        lat: 37.7749, // Default SF coordinates
-        lng: -122.4194,
-      },
-      type: suggestion.types?.[0],
-      url: `https://www.google.com/maps/search/${encodeURIComponent(suggestion.mainText + ' ' + suggestion.secondaryText)}`,
-    };
+    // For real place IDs, use the PlacesService
+    await loadGoogleMaps();
+    
+    return new Promise((resolve, reject) => {
+      if (!placesService) {
+        reject(new Error('Places service not initialized'));
+        return;
+      }
 
-    const details: LocationDetails = {
-      location,
-      // Static details for demo purposes
-      openingHours: undefined,
-      rating: undefined,
-      priceLevel: undefined,
-      phoneNumber: undefined,
-      website: undefined,
-    };
+      const request = {
+        placeId: placeId,
+        fields: ['name', 'formatted_address', 'geometry', 'types', 'url', 'opening_hours', 'rating', 'price_level', 'formatted_phone_number', 'website']
+      };
 
-    return details;
+      placesService.getDetails(request, (place, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && place) {
+          const location: EventLocation = {
+            name: place.name || '',
+            address: place.formatted_address || '',
+            placeId: placeId,
+            coordinates: place.geometry?.location ? {
+              lat: place.geometry.location.lat(),
+              lng: place.geometry.location.lng(),
+            } : undefined,
+            type: place.types?.[0],
+            url: place.url,
+          };
+
+          const details: LocationDetails = {
+            location,
+            openingHours: place.opening_hours ? {
+              isOpen: place.opening_hours.isOpen?.() || false,
+              weekdayText: place.opening_hours.weekday_text || [],
+            } : undefined,
+            rating: place.rating,
+            priceLevel: place.price_level,
+            phoneNumber: place.formatted_phone_number,
+            website: place.website,
+          };
+
+          resolve(details);
+        } else {
+          reject(new Error(`Place details error: ${status}`));
+        }
+      });
+    });
   },
 
   // Geocode an address to get coordinates
@@ -236,7 +401,7 @@ export const locationService = {
     });
   },
 
-    // Get nearby places based on event type and time
+  // Get nearby places based on event type and time
   async getSuggestedLocations(
     coordinates: { lat: number; lng: number },
     eventType: string,
@@ -244,51 +409,34 @@ export const locationService = {
   ): Promise<LocationSuggestion[]> {
     console.log('[LocationService] getSuggestedLocations called with:', { coordinates, eventType, radius });
     
-    // Since AutocompleteService is deprecated for new customers, use static suggestions
-    // These can be replaced with the new AutocompleteSuggestion API later
-    
-    const staticSuggestions: Record<string, LocationSuggestion[]> = {
-      lunch: [
-        { placeId: 'lunch1', mainText: 'The French Laundry', secondaryText: '6640 Washington St, Yountville, CA', types: ['restaurant'] },
-        { placeId: 'lunch2', mainText: 'Chez Panisse', secondaryText: '1517 Shattuck Ave, Berkeley, CA', types: ['restaurant'] },
-        { placeId: 'lunch3', mainText: 'Sweetgreen', secondaryText: '2 Embarcadero Center, San Francisco, CA', types: ['restaurant', 'healthy'] },
-      ],
-      dinner: [
-        { placeId: 'dinner1', mainText: 'Gary Danko', secondaryText: '800 N Point St, San Francisco, CA', types: ['restaurant', 'fine_dining'] },
-        { placeId: 'dinner2', mainText: 'House of Prime Rib', secondaryText: '1906 Van Ness Ave, San Francisco, CA', types: ['restaurant'] },
-        { placeId: 'dinner3', mainText: 'Atelier Crenn', secondaryText: '3127 Fillmore St, San Francisco, CA', types: ['restaurant', 'fine_dining'] },
-      ],
-      coffee: [
-        { placeId: 'coffee1', mainText: 'Blue Bottle Coffee', secondaryText: '66 Mint St, San Francisco, CA', types: ['cafe', 'coffee_shop'] },
-        { placeId: 'coffee2', mainText: 'Philz Coffee', secondaryText: '549 Castro St, San Francisco, CA', types: ['cafe', 'coffee_shop'] },
-        { placeId: 'coffee3', mainText: 'Ritual Coffee Roasters', secondaryText: '1026 Valencia St, San Francisco, CA', types: ['cafe', 'coffee_shop'] },
-      ],
-      meeting: [
-        { placeId: 'meeting1', mainText: 'WeWork Salesforce Tower', secondaryText: '415 Mission St, San Francisco, CA', types: ['coworking_space'] },
-        { placeId: 'meeting2', mainText: 'The St. Regis San Francisco', secondaryText: '125 3rd St, San Francisco, CA', types: ['hotel', 'meeting_space'] },
-        { placeId: 'meeting3', mainText: 'Soho House', secondaryText: '1812 Telegraph Ave, Oakland, CA', types: ['club', 'meeting_space'] },
-      ],
-      workout: [
-        { placeId: 'gym1', mainText: 'Equinox Sports Club', secondaryText: '747 Market St, San Francisco, CA', types: ['gym'] },
-        { placeId: 'gym2', mainText: 'Barry\'s Bootcamp', secondaryText: '2368 Fillmore St, San Francisco, CA', types: ['gym', 'fitness'] },
-        { placeId: 'gym3', mainText: 'CrossFit Golden Gate', secondaryText: '1410 Fillmore St, San Francisco, CA', types: ['gym', 'crossfit'] },
-      ],
-      shopping: [
-        { placeId: 'shop1', mainText: 'Westfield San Francisco Centre', secondaryText: '865 Market St, San Francisco, CA', types: ['shopping_mall'] },
-        { placeId: 'shop2', mainText: 'Union Square', secondaryText: 'Union Square, San Francisco, CA', types: ['shopping_area'] },
-        { placeId: 'shop3', mainText: 'Ferry Building Marketplace', secondaryText: '1 Ferry Building, San Francisco, CA', types: ['shopping_mall', 'food'] },
-      ],
-      entertainment: [
-        { placeId: 'ent1', mainText: 'AMC Metreon 16', secondaryText: '135 4th St, San Francisco, CA', types: ['movie_theater'] },
-        { placeId: 'ent2', mainText: 'San Francisco Museum of Modern Art', secondaryText: '151 3rd St, San Francisco, CA', types: ['museum'] },
-        { placeId: 'ent3', mainText: 'The Fillmore', secondaryText: '1805 Geary Blvd, San Francisco, CA', types: ['music_venue'] },
-      ],
-    };
-    
-    const suggestions = staticSuggestions[eventType.toLowerCase()] || staticSuggestions['meeting'];
-    console.log('[LocationService] Returning static suggestions:', suggestions.length);
-    
-    return suggestions;
+    try {
+      // Use the new Places API with appropriate types for the event
+      const types = getPlaceTypesForEvent(eventType);
+      const query = eventType.toLowerCase() + ' near me';
+      
+      const response = await callPlacesAutocomplete(query, types);
+      
+      if (response.suggestions) {
+        const suggestions = response.suggestions.map(suggestion => {
+          const prediction = suggestion.placePrediction;
+          return {
+            placeId: prediction.placeId,
+            mainText: prediction.structuredFormat?.mainText?.text || prediction.text.text,
+            secondaryText: prediction.structuredFormat?.secondaryText?.text || '',
+            types: prediction.types || ['establishment']
+          };
+        });
+        
+        // Limit to 3 suggestions
+        return suggestions.slice(0, 3);
+      }
+      
+      // Fallback to static suggestions if API fails
+      return getStaticSuggestions(eventType);
+    } catch (error) {
+      console.error('[LocationService] Failed to get suggestions, using static fallback:', error);
+      return getStaticSuggestions(eventType);
+    }
   },
 
   // Format location for display
