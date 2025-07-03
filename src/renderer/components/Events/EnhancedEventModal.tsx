@@ -25,12 +25,15 @@ import {
   Psychology,
   AccessTime,
   LocationOn,
-  People
+  People,
+  OpenInNew
 } from '@mui/icons-material';
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { Event } from '../../services/supabase';
-import { EventFormData } from '../../types';
+import { EventFormData, EventLocation } from '../../types';
 import SmartSchedulingSuggestions from './SmartSchedulingSuggestions';
+import { LocationAutocomplete } from './LocationAutocomplete';
+import { locationService } from '../../services/location';
 import dayjs from 'dayjs';
 
 interface EnhancedEventModalProps {
@@ -76,6 +79,8 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
   const [showSmartSuggestions, setShowSmartSuggestions] = useState(true);
   const [attendeesInput, setAttendeesInput] = useState('');
   const [errors, setErrors] = useState<FormErrors>({});
+  const [locationData, setLocationData] = useState<EventLocation | string>('');
+  const [locationAdded, setLocationAdded] = useState(false);
 
   useEffect(() => {
     if (event) {
@@ -85,11 +90,12 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
         description: event.description || '',
         startTime: new Date(event.start_time),
         endTime: new Date(event.end_time),
-        location: event.location || '',
+        location: typeof event.location === 'object' ? event.location.address : event.location || '',
         attendees: event.attendees || [],
         isRecurring: event.is_recurring,
         recurrenceRule: event.recurrence_rule || ''
       });
+      setLocationData(event.location || '');
       setAttendeesInput((event.attendees || []).join(', '));
     } else {
       // Creating new event
@@ -107,6 +113,7 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
         isRecurring: false,
         recurrenceRule: ''
       });
+      setLocationData('');
       setAttendeesInput('');
     }
     setErrors({});
@@ -281,6 +288,19 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
                   preferredDate={selectedDate}
                   existingEvents={existingEvents}
                   onTimeSlotSelect={handleTimeSlotSelect}
+                  onLocationSelect={(location) => {
+                    // Set the location data
+                    setLocationData(location);
+                    // Store the formatted address in formData for backward compatibility
+                    const locationString = typeof location === 'string' 
+                      ? location 
+                      : location.address || location.name;
+                    handleInputChange('location', locationString);
+                    
+                    // Show feedback
+                    setLocationAdded(true);
+                    setTimeout(() => setLocationAdded(false), 3000);
+                  }}
                   onClose={() => setShowSmartSuggestions(false)}
                 />
               )}
@@ -301,17 +321,41 @@ const EnhancedEventModal: React.FC<EnhancedEventModalProps> = ({
               )}
 
               {/* Location Section */}
-              <TextField
-                fullWidth
-                label="Location"
-                value={formData.location}
-                onChange={(e) => handleInputChange('location', e.target.value)}
-                margin="normal"
-                InputProps={{
-                  startAdornment: <LocationOn color="action" sx={{ mr: 1 }} />
-                }}
-                placeholder="Add location or meeting link"
-              />
+              <Box mt={2}>
+                {locationAdded && (
+                  <Alert severity="success" sx={{ mb: 1 }}>
+                    Location added to event!
+                  </Alert>
+                )}
+                <LocationAutocomplete
+                  value={locationData}
+                  onChange={(newValue) => {
+                    setLocationData(newValue);
+                    // Store the formatted address in formData for backward compatibility
+                    const locationString = typeof newValue === 'string' 
+                      ? newValue 
+                      : newValue.address || newValue.name;
+                    handleInputChange('location', locationString);
+                  }}
+                  eventType={formData.title.toLowerCase()}
+                />
+                
+                {/* Show Google Maps link if we have a structured location */}
+                {locationData && typeof locationData === 'object' && locationData.url && (
+                  <Box mt={1}>
+                    <Button
+                      size="small"
+                      startIcon={<OpenInNew />}
+                      href={locationService.createMapsUrl(locationData)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      component="a"
+                    >
+                      View on Google Maps
+                    </Button>
+                  </Box>
+                )}
+              </Box>
 
               {/* Attendees Section */}
               <TextField

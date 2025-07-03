@@ -2,6 +2,8 @@ import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { Event } from './supabase';
 import dayjs from 'dayjs';
+import { locationService } from './location';
+import { EventLocation } from '../types';
 
 // Types for the smart scheduling feature
 export interface EventClassification {
@@ -15,6 +17,7 @@ export interface TimeSlotSuggestion {
   endTime: Date;
   reasoning: string;
   priority: number;
+  locationSuggestions?: EventLocation[];
 }
 
 export interface SmartSchedulingResult {
@@ -91,9 +94,16 @@ class SmartSchedulingService {
         fullPreferences
       );
 
+      // Step 4: Add location suggestions based on event type
+      const enhancedSlots = await this.enhanceWithLocationSuggestions(
+        suggestedSlots,
+        title,
+        classification
+      );
+
       return {
         classification,
-        suggestedSlots,
+        suggestedSlots: enhancedSlots,
         duration
       };
     } catch (error) {
@@ -458,6 +468,64 @@ class SmartSchedulingService {
       suggestedSlots,
       duration
     };
+  }
+
+  /**
+   * Enhance time slot suggestions with location recommendations
+   */
+  private async enhanceWithLocationSuggestions(
+    timeSlots: TimeSlotSuggestion[],
+    eventTitle: string,
+    classification: EventClassification
+  ): Promise<TimeSlotSuggestion[]> {
+    try {
+      // Get user's current location or default to a central location
+      const defaultLocation = { lat: 37.7749, lng: -122.4194 }; // San Francisco as default
+      
+      // Map classification to event type for location search
+      const eventTypeMap: Record<string, string> = {
+        business: 'meeting',
+        hobby: eventTitle.toLowerCase().includes('gym') || eventTitle.toLowerCase().includes('workout') ? 'workout' : 'entertainment',
+        personal: eventTitle.toLowerCase().includes('lunch') || eventTitle.toLowerCase().includes('dinner') ? 'dinner' : 'shopping'
+      };
+      
+      const eventType = eventTypeMap[classification.type] || 'meeting';
+      
+      // Get location suggestions
+      const locationSuggestions = await locationService.getSuggestedLocations(
+        defaultLocation,
+        eventType,
+        5000 // 5km radius
+      );
+      
+      // Convert suggestions to EventLocation format
+      const locations: EventLocation[] = await Promise.all(
+        locationSuggestions.slice(0, 3).map(async (suggestion) => {
+          try {
+            const details = await locationService.getPlaceDetails(suggestion.placeId);
+            return details.location;
+          } catch (error) {
+            // Fallback if details fetch fails
+            return {
+              name: suggestion.mainText,
+              address: suggestion.secondaryText,
+              placeId: suggestion.placeId,
+              type: suggestion.types[0]
+            };
+          }
+        })
+      );
+      
+      // Add location suggestions to each time slot
+      return timeSlots.map(slot => ({
+        ...slot,
+        locationSuggestions: locations
+      }));
+    } catch (error) {
+      console.error('Error enhancing with location suggestions:', error);
+      // Return original slots if location enhancement fails
+      return timeSlots;
+    }
   }
 }
 

@@ -1,3 +1,44 @@
+// Types for the smart scheduling feature
+
+export type EventType = 'meeting' | 'meal' | 'exercise' | 'work' | 'personal' | 'break' | 'other';
+
+export interface EventClassification {
+  type: 'business' | 'hobby' | 'personal';
+  confidence: number;
+  reasoning: string;
+}
+
+export interface TimeSlotSuggestion {
+  startTime: Date;
+  endTime: Date;
+  reasoning: string;
+  priority: number;
+  locationSuggestion?: string;
+}
+
+export interface SmartSchedulingResult {
+  classification: EventClassification;
+  suggestedSlots: TimeSlotSuggestion[];
+  duration: number; // in minutes
+}
+
+export interface SchedulingPreferences {
+  businessHours: {
+    start: string; // HH:mm format
+    end: string;   // HH:mm format
+  };
+  workDays: number[]; // 0 = Sunday, 1 = Monday, etc.
+  preferredDuration: {
+    business: number; // minutes
+    hobby: number;    // minutes
+  };
+}
+
+export interface SchedulingSuggestion extends TimeSlotSuggestion {
+  conflicts: string[];
+  locationSuggestion?: string;
+}
+
 // Smart Scheduling Type Definitions
 
 export interface EventClassification {
@@ -108,7 +149,6 @@ export interface SchedulingAnalytics {
 }
 
 // Export utility types
-export type EventType = EventClassification['type'];
 export type PipelineStep = 'classify' | 'validate' | 'refine' | 'schedule' | 'optimize';
 export type ConditionalEdgeResult = string;
 

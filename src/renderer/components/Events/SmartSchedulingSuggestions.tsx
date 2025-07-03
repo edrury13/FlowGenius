@@ -28,7 +28,9 @@ import {
   Speed,
   Timeline,
   AutoFixHigh,
-  ExpandMore
+  ExpandMore,
+  LocationOn,
+  Check
 } from '@mui/icons-material';
 import { Event } from '../../services/supabase';
 import smartSchedulingPipeline, {
@@ -44,6 +46,7 @@ interface SmartSchedulingSuggestionsProps {
   preferredDate?: Date;
   existingEvents: Event[];
   onTimeSlotSelect: (startTime: Date, endTime: Date) => void;
+  onLocationSelect?: (location: any) => void; // EventLocation type
   onClose: () => void;
 }
 
@@ -53,6 +56,7 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
   preferredDate,
   existingEvents,
   onTimeSlotSelect,
+  onLocationSelect,
   onClose
 }) => {
   const [suggestions, setSuggestions] = useState<SmartSchedulingPipelineResult | null>(null);
@@ -89,6 +93,11 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
 
       clearInterval(progressInterval);
       setPipelineProgress(100);
+      
+      // Debug: Log the result to check if location suggestions are present
+      console.log('Smart scheduling result:', result);
+      console.log('Time slots with locations:', result.suggestedSlots);
+      
       setSuggestions(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate suggestions');
@@ -292,6 +301,13 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                   const timeInfo = formatTimeSlot(suggestion);
                   const priorityInfo = getPriorityLabel(suggestion.priority);
                   const optimalityInfo = getOptimalityScore(suggestion);
+                  
+                  // Debug location suggestions
+                  console.log('[UI] Rendering slot', index, 'with locations:', { 
+                    hasLocations: !!suggestion.locationSuggestions,
+                    locationCount: suggestion.locationSuggestions?.length || 0,
+                    locations: suggestion.locationSuggestions
+                  });
 
                   return (
                     <Card
@@ -339,6 +355,45 @@ const SmartSchedulingSuggestions: React.FC<SmartSchedulingSuggestionsProps> = ({
                                 />
                               )}
                             </Box>
+                            
+                            {/* Location Suggestions */}
+                            {suggestion.locationSuggestions && suggestion.locationSuggestions.length > 0 && (
+                              <Box mt={1}>
+                                <Box display="flex" alignItems="center" gap={0.5} mb={0.5}>
+                                  <LocationOn sx={{ fontSize: 16, color: 'text.secondary' }} />
+                                  <Typography variant="caption" color="text.secondary">
+                                    Suggested Locations:
+                                  </Typography>
+                                </Box>
+                                <Stack direction="row" spacing={0.5} flexWrap="wrap">
+                                  {suggestion.locationSuggestions.slice(0, 2).map((location, locIndex) => (
+                                    <Tooltip key={locIndex} title="Click to add this location to the event">
+                                      <Chip
+                                        label={location.name}
+                                        size="small"
+                                        variant="outlined"
+                                        color="primary"
+                                        sx={{ 
+                                          fontSize: '0.7rem',
+                                          cursor: 'pointer',
+                                          '&:hover': {
+                                            backgroundColor: 'primary.main',
+                                            color: 'primary.contrastText',
+                                            borderColor: 'primary.main'
+                                          }
+                                        }}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (onLocationSelect) {
+                                            onLocationSelect(location);
+                                          }
+                                        }}
+                                      />
+                                    </Tooltip>
+                                  ))}
+                                </Stack>
+                              </Box>
+                            )}
                           </Box>
                           
                           <Box textAlign="right">

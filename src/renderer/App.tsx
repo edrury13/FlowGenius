@@ -24,6 +24,7 @@ import {
 } from './store/aiAssistantSlice';
 import type { RootState } from './store';
 import dayjs from 'dayjs';
+import { loadGoogleMaps } from './services/location';
 
 interface Event {
   id: string;
@@ -242,6 +243,13 @@ const App: React.FC = () => {
 
     loadEvents();
   }, [isLoggedIn, user]); // Reload events when authentication state changes
+
+  // Load Google Maps once when the app initializes
+  useEffect(() => {
+    loadGoogleMaps().catch(error => {
+      console.error('Failed to load Google Maps:', error);
+    });
+  }, []); // Empty dependency array ensures this runs only once
 
   // Initialize services and setup auth listener
   useEffect(() => {

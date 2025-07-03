@@ -167,3 +167,15 @@ export interface ExportOptions {
 }
 
 // Window API extension for Electron is defined in preload.ts 
+
+export interface EventLocation {
+  name: string;
+  address: string;
+  placeId?: string;
+  coordinates?: {
+    lat: number;
+    lng: number;
+  };
+  type?: string; // restaurant, office, cafe, etc.
+  url?: string; // Google Maps URL
+} 

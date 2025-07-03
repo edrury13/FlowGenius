@@ -154,16 +154,17 @@ const createWindow = (): void => {
 
   // Hide to tray on close instead of quitting
   mainWindow.on('close', (event) => {
-    if (!isQuiting && process.platform === 'win32') {
+    if (!isQuiting) {
       event.preventDefault();
       mainWindow?.hide();
+      console.log('🔽 Window hidden to system tray');
       
-      // Show tray notification
-      if (tray) {
+      // Show tray notification on Windows
+      if (tray && process.platform === 'win32') {
         tray.displayBalloon({
           iconType: 'info',
           title: 'FlowGenius',
-          content: 'FlowGenius is still running in the background. Use the tray icon to access it.'
+          content: 'FlowGenius is still running in the background. Click the tray icon to access it.'
         });
       }
     }
@@ -177,18 +178,187 @@ const createWindow = (): void => {
 
 // Enhanced tray with upcoming events
 const createTray = (): void => {
-  // Create tray icon
-  const iconPath = path.join(__dirname, '../../assets/tray-icon.png');
-  let trayIcon: Electron.NativeImage;
+  // Create tray icon - try multiple paths to find the icon
+  const possiblePaths = [
+    path.join(__dirname, '../../assets/tray-icon.png'),
+    path.join(__dirname, '../assets/tray-icon.png'),
+    path.join(__dirname, '../../src/assets/tray-icon.png'),
+    path.join(process.cwd(), 'src/assets/tray-icon.png'),
+    path.join(process.cwd(), 'FlowGenius/src/assets/tray-icon.png'),
+    path.join(app.getAppPath(), 'src/assets/tray-icon.png')
+  ];
   
-  try {
-    trayIcon = nativeImage.createFromPath(iconPath);
-  } catch (error) {
-    // Fallback to a simple icon if custom icon not found
-    trayIcon = nativeImage.createEmpty();
+  let iconPath = '';
+  console.log('🔧 Looking for tray icon in multiple locations...');
+  console.log('Current working directory:', process.cwd());
+  console.log('__dirname:', __dirname);
+  console.log('app.getAppPath():', app.getAppPath());
+  
+  // Try to find the icon file
+  for (const testPath of possiblePaths) {
+    console.log('🔍 Trying path:', testPath);
+    try {
+      const fs = require('fs');
+      if (fs.existsSync(testPath)) {
+        iconPath = testPath;
+        console.log('✅ Found tray icon at:', iconPath);
+        break;
+      }
+    } catch (error) {
+      console.log('❌ Error checking path:', testPath, (error as Error).message);
+    }
   }
   
-  tray = new Tray(trayIcon.resize({ width: 16, height: 16 }));
+  if (!iconPath) {
+    console.error('❌ Could not find tray-icon.png in any expected location');
+    console.log('Available paths checked:', possiblePaths);
+  }
+  
+  let trayIcon: Electron.NativeImage;
+  
+  if (iconPath) {
+    try {
+      trayIcon = nativeImage.createFromPath(iconPath);
+      if (trayIcon.isEmpty()) {
+        console.warn('⚠️ Tray icon is empty, using fallback');
+        // Create a simple icon as fallback
+        trayIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAdgAAAHYBTnsmCAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAFZSURBVDiNpZM9SwNBEIafgwQSCxsLwcJCG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1s');
+      }
+      console.log('✅ Tray icon loaded successfully');
+    } catch (error) {
+      console.error('❌ Failed to load tray icon:', error);
+      // Fallback to a simple icon if custom icon not found
+      trayIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAdgAAAHYBTnsmCAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAFZSURBVDiNpZM9SwNBEIafgwQSCxsLwcJCG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1s');
+    }
+  } else {
+    // No icon path found, create fallback icon
+    console.warn('⚠️ No tray icon path found, using fallback');
+    trayIcon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAAdgAAAHYBTnsmCAAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAFZSURBVDiNpZM9SwNBEIafgwQSCxsLwcJCG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1sLG1s');
+  }
+  
+  // Create tray with enhanced Windows debugging
+  try {
+    if (!trayIcon) {
+      console.error('❌ TrayIcon is undefined! Cannot create system tray.');
+      return;
+    }
+    
+    console.log('📐 Original tray icon size:', trayIcon.getSize());
+    const resizedIcon = trayIcon.resize({ width: 16, height: 16 });
+    console.log('📐 Resized tray icon size:', resizedIcon.getSize());
+    
+    tray = new Tray(resizedIcon);
+    console.log('✅ System tray object created successfully');
+    console.log('🔍 Tray object:', tray);
+    
+    // Immediately set tooltip and context menu - sometimes helps Windows show the icon
+    tray.setToolTip('FlowGenius - Calendar & Productivity App');
+    
+    // Set a basic context menu immediately
+    const basicMenu = Menu.buildFromTemplate([
+      { label: 'Show FlowGenius', click: () => mainWindow?.show() },
+      { type: 'separator' },
+      { label: 'Quit', click: () => { isQuiting = true; app.quit(); } }
+    ]);
+    tray.setContextMenu(basicMenu);
+    console.log('📋 Basic context menu set');
+    
+    // Force Windows to show the tray icon
+    if (process.platform === 'win32') {
+      // Windows 11 specific handling
+      const os = require('os');
+      const windowsVersion = os.release();
+      console.log('🪟 Windows version:', windowsVersion);
+      
+      // Try to force the icon to be visible
+      tray.setIgnoreDoubleClickEvents(false);
+      
+      // Add click handler
+      tray.on('click', () => {
+        console.log('🖱️ Tray clicked');
+        if (mainWindow) {
+          if (mainWindow.isVisible()) {
+            mainWindow.hide();
+          } else {
+            mainWindow.show();
+            mainWindow.focus();
+          }
+        }
+      });
+      
+      tray.on('right-click', () => {
+        console.log('🖱️ Tray right-clicked');
+      });
+      
+      // Try alternative icon creation method for Windows 11
+      setTimeout(() => {
+        if (tray && !tray.isDestroyed()) {
+          try {
+            // Re-set the tooltip
+            tray.setToolTip('FlowGenius - Click to show/hide');
+            
+            // Try to get the actual icon file path
+            const iconFilePath = path.join(__dirname, '../../src/assets/icon.ico');
+            if (require('fs').existsSync(iconFilePath)) {
+              console.log('🔄 Trying to set .ico file:', iconFilePath);
+              tray.setImage(iconFilePath);
+            }
+          } catch (e) {
+            console.error('Error updating tray:', e);
+          }
+        }
+      }, 1000);
+    }
+    
+    // Windows-specific debugging and tests
+    if (process.platform === 'win32') {
+      console.log('🪟 Windows detected - running Windows-specific tray tests...');
+      
+      // Test if we can get tray bounds (indicates Windows can see it)
+      setTimeout(() => {
+        if (tray && !tray.isDestroyed()) {
+          console.log('✅ Tray object exists after 2 seconds');
+          
+          try {
+            const bounds = tray.getBounds();
+            console.log('📍 Tray bounds:', bounds);
+            if (bounds.width === 0 && bounds.height === 0) {
+              console.warn('⚠️ Tray bounds are 0x0 - this usually means Windows is hiding the icon');
+              console.warn('💡 SOLUTION: Check Windows notification area settings');
+            }
+          } catch (boundsError) {
+            console.warn('⚠️ Could not get tray bounds:', boundsError);
+          }
+          
+          // Test balloon notification to verify tray is accessible
+          try {
+            tray.displayBalloon({
+              iconType: 'info',
+              title: 'FlowGenius System Tray Test',
+              content: 'If you see this notification, the system tray is working but the icon might be hidden in Windows notification settings.'
+            });
+            console.log('🎈 Test balloon sent - if you see it, check notification area settings');
+          } catch (balloonError) {
+            console.error('❌ Could not display test balloon:', balloonError);
+            console.error('💡 SOLUTION: Windows may be blocking notifications. Try running as administrator.');
+          }
+          
+        } else {
+          console.error('❌ Tray object was destroyed or became null');
+        }
+      }, 2000);
+      
+    } else {
+      console.log('🍎 Non-Windows platform detected');
+    }
+    
+  } catch (trayCreateError) {
+    console.error('❌ Failed to create system tray:', trayCreateError);
+    console.error('💡 Possible solutions:');
+    console.error('   1. Run as administrator');
+    console.error('   2. Check Windows notification area settings');
+    console.error('   3. Restart Windows Explorer');
+  }
 
   // Update tray menu with upcoming events
   const updateTrayMenu = () => {
@@ -286,7 +456,9 @@ const createTray = (): void => {
       },
     ]);
 
-    tray!.setContextMenu(contextMenu);
+    if (tray) {
+      tray.setContextMenu(contextMenu);
+    }
   };
 
   // Initial menu setup
@@ -297,30 +469,34 @@ const createTray = (): void => {
     const now = new Date().toLocaleTimeString();
     const eventCount = upcomingEvents.length;
     const tooltip = `FlowGenius - ${now}\n${eventCount} upcoming events`;
-    tray!.setToolTip(tooltip);
+    if (tray) {
+      tray.setToolTip(tooltip);
+    }
   };
 
   updateTooltip();
   setInterval(updateTooltip, 60000); // Update every minute
 
   // Show window on tray click
-  tray.on('click', () => {
-    if (mainWindow) {
-      if (mainWindow.isVisible()) {
-        mainWindow.hide();
-      } else {
-        mainWindow.show();
-        mainWindow.focus();
+  if (tray) {
+    tray.on('click', () => {
+      if (mainWindow) {
+        if (mainWindow.isVisible()) {
+          mainWindow.hide();
+        } else {
+          mainWindow.show();
+          mainWindow.focus();
+        }
       }
-    }
-  });
+    });
+  }
 
   // Update menu when events change
   ipcMain.on('update-upcoming-events', (event, events) => {
     upcomingEvents = events;
     updateTrayMenu();
   });
-};
+}; // End of createTray function
 
 // Auto-startup functionality
 const enableAutoStartup = (): void => {
@@ -334,6 +510,8 @@ const enableAutoStartup = (): void => {
 
 // This method will be called when Electron has finished initialization
 app.whenReady().then(() => {
+  console.log('🚀 FlowGenius starting up...');
+  
   createWindow();
   createTray();
   enableAutoStartup();
@@ -341,6 +519,8 @@ app.whenReady().then(() => {
   
   // Start app usage tracking
   windowsAppTracker.startTracking();
+  
+  console.log('✅ FlowGenius startup complete - System tray should be visible');
 
   app.on('activate', () => {
     // On OS X it's common to re-create a window in the app when the
@@ -351,17 +531,33 @@ app.whenReady().then(() => {
   });
 });
 
-// Quit when all windows are closed, except on macOS
+// Handle window-all-closed differently to support system tray
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  // On macOS, keep the app running even when all windows are closed
+  if (process.platform === 'darwin') {
+    return;
+  }
+  
+  // On Windows/Linux, only quit if user explicitly chose to quit
+  // Otherwise, keep running in system tray
+  if (isQuiting) {
     windowsAppTracker.stopTracking();
     app.quit();
   }
+  // If not quitting, just let the app run in the background with system tray
+});
+
+// Handle the before-quit event to set the quitting flag
+app.on('before-quit', () => {
+  console.log('🚪 App is quitting...');
+  isQuiting = true;
 });
 
 // Clean up shortcuts on quit
 app.on('will-quit', () => {
+  console.log('🧹 Cleaning up before quit...');
   globalShortcut.unregisterAll();
+  windowsAppTracker.stopTracking();
 });
 
 // Prevent multiple instances
@@ -443,4 +639,4 @@ ipcMain.handle('get-app-info', async () => {
   };
 });
 
-export { mainWindow }; 
+ 

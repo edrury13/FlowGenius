@@ -2,6 +2,7 @@ import { ChatOpenAI } from '@langchain/openai';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { Event } from './supabase';
 import dayjs from 'dayjs';
+import { locationService } from './location';
 
 // State interface for passing data between nodes
 export interface PipelineState {
@@ -47,6 +48,7 @@ export interface TimeSlotSuggestion {
   priority: number;
   conflictScore: number;
   optimalityScore: number;
+  locationSuggestions?: any[]; // Will be EventLocation[] but avoiding circular dependency
 }
 
 export interface SchedulingPreferences {
@@ -77,6 +79,7 @@ export interface SmartSchedulingPipelineResult {
 
 class SmartSchedulingPipeline {
   private llm: ChatOpenAI;
+  private lastEventTitle: string = '';
   private readonly DEFAULT_PREFERENCES: SchedulingPreferences = {
     businessHours: {
       start: '09:00',
@@ -117,6 +120,9 @@ class SmartSchedulingPipeline {
   ): Promise<SmartSchedulingPipelineResult> {
     const startTime = Date.now();
     const fullPreferences = { ...this.DEFAULT_PREFERENCES, ...preferences };
+    
+    // Store the event title for meal detection
+    this.lastEventTitle = title;
 
     // Initialize pipeline state
     let state: PipelineState = {
@@ -290,7 +296,7 @@ class SmartSchedulingPipeline {
 
     try {
       const duration = this.estimateEventDuration(state.title, state.description, classification, state.preferences);
-      const suggestedSlots = await this.generateAdvancedTimeSlots(
+      let suggestedSlots = await this.generateAdvancedTimeSlots(
         classification,
         duration,
         state.preferredDate,
@@ -298,11 +304,24 @@ class SmartSchedulingPipeline {
         state.preferences
       );
       
+      // Enhance slots with location suggestions
+      console.log('[Pipeline] Enhancing slots with locations, before:', suggestedSlots.length, 'slots');
+      suggestedSlots = await this.enhanceWithLocationSuggestions(
+        suggestedSlots,
+        state.title,
+        classification
+      );
+      console.log('[Pipeline] After location enhancement:', suggestedSlots.map(s => ({
+        time: s.startTime,
+        hasLocations: !!s.locationSuggestions,
+        locationCount: s.locationSuggestions?.length || 0
+      })));
+      
       return {
         duration,
         suggestedSlots,
         pipelineStep: 'schedule',
-        reasoning: [...state.reasoning, `Generated ${suggestedSlots.length} time slot suggestions for ${duration}min event`]
+        reasoning: [...state.reasoning, `Generated ${suggestedSlots.length} time slot suggestions for ${duration}min event with location recommendations`]
       };
     } catch (error) {
       return {
@@ -601,6 +620,10 @@ class SmartSchedulingPipeline {
     const today = dayjs();
     const startDate = preferredDate ? dayjs(preferredDate) : today;
     
+    // Check if this is a meal event
+    const title = this.lastEventTitle || '';
+    const isMealEvent = this.isMealEvent(title, classification);
+    
     // Generate suggestions for next 10 days (expanded from 7)
     for (let i = 0; i < 10; i++) {
       const currentDate = startDate.add(i, 'day');
@@ -608,7 +631,10 @@ class SmartSchedulingPipeline {
       
       let daySlots: TimeSlotSuggestion[] = [];
       
-      if (classification.type === 'business') {
+      // Special handling for meal events
+      if (isMealEvent) {
+        daySlots = this.generateMealTimeSlots(currentDate, duration, existingEvents, preferences, title);
+      } else if (classification.type === 'business') {
         if (preferences.workDays.includes(dayOfWeek)) {
           daySlots = this.generateBusinessHourSlots(currentDate, duration, existingEvents, preferences);
         }
@@ -894,6 +920,124 @@ class SmartSchedulingPipeline {
   }
 
   /**
+   * Check if an event is meal-related
+   */
+  private isMealEvent(title: string, classification: EventClassification): boolean {
+    const lowerTitle = title.toLowerCase();
+    const mealKeywords = ['breakfast', 'brunch', 'lunch', 'dinner', 'meal', 'dining', 'eat', 'food'];
+    return mealKeywords.some(keyword => lowerTitle.includes(keyword));
+  }
+
+  /**
+   * Generate meal-specific time slots
+   */
+  private generateMealTimeSlots(
+    date: dayjs.Dayjs,
+    duration: number,
+    existingEvents: Event[],
+    preferences: SchedulingPreferences,
+    title: string
+  ): TimeSlotSuggestion[] {
+    const slots: TimeSlotSuggestion[] = [];
+    const lowerTitle = title.toLowerCase();
+    
+    // Define meal times
+    const mealTimes = {
+      breakfast: [
+        { start: 7, end: 9, label: 'Early breakfast' },
+        { start: 8, end: 10, label: 'Breakfast' }
+      ],
+      brunch: [
+        { start: 10, end: 12, label: 'Brunch time' },
+        { start: 11, end: 13, label: 'Late brunch' }
+      ],
+      lunch: [
+        { start: 11, end: 13, label: 'Early lunch' },
+        { start: 12, end: 14, label: 'Lunch time' },
+        { start: 13, end: 15, label: 'Late lunch' }
+      ],
+      dinner: [
+        { start: 17, end: 19, label: 'Early dinner' },
+        { start: 18, end: 20, label: 'Dinner time' },
+        { start: 19, end: 21, label: 'Late dinner' }
+      ]
+    };
+    
+    // Determine which meal type
+    let mealType: keyof typeof mealTimes | null = null;
+    if (lowerTitle.includes('breakfast')) mealType = 'breakfast';
+    else if (lowerTitle.includes('brunch')) mealType = 'brunch';
+    else if (lowerTitle.includes('lunch')) mealType = 'lunch';
+    else if (lowerTitle.includes('dinner') || lowerTitle.includes('dining')) mealType = 'dinner';
+    else mealType = 'lunch'; // Default to lunch for generic meal events
+    
+    const timeSlots = mealTimes[mealType];
+    
+    for (const timeSlot of timeSlots) {
+      const startTime = date.hour(timeSlot.start).minute(0).second(0);
+      const endTime = startTime.add(duration, 'minute');
+      
+      if (!this.hasConflict(startTime.toDate(), endTime.toDate(), existingEvents)) {
+        const hasBufferConflict = this.hasBufferConflict(
+          startTime.toDate(),
+          endTime.toDate(),
+          existingEvents,
+          preferences.bufferTime
+        );
+        
+        if (!hasBufferConflict) {
+          slots.push({
+            startTime: startTime.toDate(),
+            endTime: endTime.toDate(),
+            reasoning: `${timeSlot.label} on ${startTime.format('dddd, MMMM D')} at ${startTime.format('h:mm A')}`,
+            priority: this.calculateMealPriority(startTime, mealType),
+            conflictScore: 0,
+            optimalityScore: 0
+          });
+        }
+      }
+    }
+    
+    return slots;
+  }
+
+  /**
+   * Calculate priority for meal events
+   */
+  private calculateMealPriority(time: dayjs.Dayjs, mealType: string): number {
+    const hour = time.hour();
+    let priority = 70; // Base priority for meals
+    
+    // Optimal times for each meal
+    switch (mealType) {
+      case 'breakfast':
+        if (hour === 8) priority = 100;
+        else if (hour === 7 || hour === 9) priority = 90;
+        break;
+      case 'brunch':
+        if (hour === 11) priority = 100;
+        else if (hour === 10 || hour === 12) priority = 90;
+        break;
+      case 'lunch':
+        if (hour === 12 || hour === 13) priority = 100;
+        else if (hour === 11 || hour === 14) priority = 85;
+        break;
+      case 'dinner':
+        if (hour === 18 || hour === 19) priority = 100;
+        else if (hour === 17 || hour === 20) priority = 90;
+        break;
+    }
+    
+    // Weekend bonus for casual meals
+    const dayOfWeek = time.day();
+    if ((dayOfWeek === 0 || dayOfWeek === 6) && mealType !== 'lunch') {
+      priority += 10;
+    }
+    
+    return priority;
+  }
+
+  /**
    * Helper methods for pipeline metadata
    */
   private extractStepsFromReasoning(reasoning: string[]): string[] {
@@ -948,6 +1092,86 @@ class SmartSchedulingPipeline {
         refinementApplied: false
       }
     };
+  }
+
+  /**
+   * Enhance time slots with location suggestions
+   */
+  private async enhanceWithLocationSuggestions(
+    timeSlots: TimeSlotSuggestion[],
+    eventTitle: string,
+    classification: EventClassification
+  ): Promise<TimeSlotSuggestion[]> {
+    try {
+      console.log('Enhancing time slots with location suggestions for:', eventTitle);
+      
+      // Get user's current location or default to a central location
+      const defaultLocation = { lat: 37.7749, lng: -122.4194 }; // San Francisco as default
+      
+      // Determine event type based on title and classification
+      let eventType = 'meeting';
+      const lowerTitle = eventTitle.toLowerCase();
+      
+      // More specific event type detection
+      if (lowerTitle.includes('breakfast') || lowerTitle.includes('brunch') || 
+          lowerTitle.includes('lunch') || lowerTitle.includes('dinner') || 
+          lowerTitle.includes('meal') || lowerTitle.includes('dining')) {
+        eventType = 'dinner'; // Use 'dinner' for all meal types
+      } else if (lowerTitle.includes('coffee')) {
+        eventType = 'coffee';
+      } else if (lowerTitle.includes('gym') || lowerTitle.includes('workout') || 
+                 lowerTitle.includes('exercise')) {
+        eventType = 'workout';
+      } else if (lowerTitle.includes('meeting') || classification.type === 'business') {
+        eventType = 'meeting';
+      } else if (lowerTitle.includes('shopping')) {
+        eventType = 'shopping';
+      } else if (classification.type === 'hobby') {
+        eventType = 'entertainment';
+      }
+      
+      console.log('Detected event type:', eventType);
+      
+      // Get location suggestions
+      const locationSuggestions = await locationService.getSuggestedLocations(
+        defaultLocation,
+        eventType,
+        5000 // 5km radius
+      );
+      
+      console.log('Got location suggestions:', locationSuggestions.length);
+      
+      // Convert suggestions to simplified location format
+      const locations = await Promise.all(
+        locationSuggestions.slice(0, 3).map(async (suggestion) => {
+          try {
+            const details = await locationService.getPlaceDetails(suggestion.placeId);
+            return details.location;
+          } catch (error) {
+            // Fallback if details fetch fails
+            return {
+              name: suggestion.mainText,
+              address: suggestion.secondaryText,
+              placeId: suggestion.placeId,
+              type: suggestion.types[0],
+              url: `https://www.google.com/maps/place/?q=place_id:${suggestion.placeId}`
+            };
+          }
+        })
+      );
+      
+      console.log('Processed locations:', locations);
+      
+      // Add location suggestions to each time slot
+      return timeSlots.map(slot => ({
+        ...slot,
+        locationSuggestions: locations
+      }));
+    } catch (error) {
+      console.error('Error enhancing with location suggestions:', error);
+      // Return original slots if location enhancement fails
+      return timeSlots;
+    }
   }
 }
 

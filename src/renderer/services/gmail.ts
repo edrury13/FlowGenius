@@ -60,13 +60,13 @@ class GmailService {
   // Initialize OAuth2 client
   private initializeAuth(): void {
     try {
-      this.auth = new google.auth.OAuth2(
-        this.config.clientId,
-        this.config.clientSecret,
-        this.config.redirectUri
-      );
+    this.auth = new google.auth.OAuth2(
+      this.config.clientId,
+      this.config.clientSecret,
+      this.config.redirectUri
+    );
 
-      this.gmail = google.gmail({ version: 'v1', auth: this.auth });
+    this.gmail = google.gmail({ version: 'v1', auth: this.auth });
       this.calendar = google.calendar({ version: 'v3', auth: this.auth });
       
       console.log('📧 Google OAuth2 client initialized');
@@ -507,7 +507,7 @@ class GmailService {
     let daysUntilTarget = targetDay - currentDay;
     
     if (daysUntilTarget <= 0) daysUntilTarget += 7;
-
+    
     const result = new Date(today);
     result.setDate(today.getDate() + daysUntilTarget);
     return result;

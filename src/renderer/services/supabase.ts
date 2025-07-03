@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient, User, Session } from '@supabase/supabase-js';
+import { EventLocation } from '../types';
 
 // Environment variables - these will be set in webpack config
 const supabaseUrl = process.env.SUPABASE_URL || '';
@@ -16,13 +17,14 @@ export interface Event {
   start_time: string;
   end_time: string;
   timezone?: string;
-  location?: string;
+  location?: EventLocation | string;  // Can be EventLocation object or string for backward compatibility
   attendees: string[];
   is_recurring: boolean;
   recurrence_rule?: string;
   parent_event_id?: string;
   created_at: string;
   updated_at: string;
+  source?: 'local' | 'google';
 }
 
 export interface Profile {
