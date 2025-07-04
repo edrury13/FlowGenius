@@ -6,7 +6,7 @@ interface AppUsageData {
   endTime?: Date;
   duration: number; // in seconds
   date: string; // YYYY-MM-DD
-  category: 'work' | 'productivity' | 'social' | 'entertainment' | 'development' | 'other';
+  category: 'work' | 'productivity' | 'social' | 'entertainment' | 'development' | 'other' | 'distraction' | 'system';
 }
 
 interface TrackingSettings {
@@ -16,6 +16,8 @@ interface TrackingSettings {
   idleThresholdMinutes: number;
   dataRetentionDays: number;
   anonymizeData: boolean;
+  distractionNotifications: boolean;
+  distractionThresholdMinutes: number;
 }
 
 interface ProductivityMetrics {
@@ -23,6 +25,7 @@ interface ProductivityMetrics {
   productiveTime: number;
   focusTime: number;
   distractionTime: number;
+  otherTime: number;
   topApps: { appName: string; duration: number; percentage: number }[];
   productivityScore: number;
   dailyPattern: { hour: number; activity: number }[];
@@ -43,7 +46,9 @@ class AppTrackingService {
     trackIdleTime: true,
     idleThresholdMinutes: 5,
     dataRetentionDays: 30,
-    anonymizeData: false
+    anonymizeData: false,
+    distractionNotifications: false,
+    distractionThresholdMinutes: 30
   };
 
   // Mock app database for realistic simulation
@@ -410,11 +415,20 @@ class AppTrackingService {
     
     // Categorize time as productive/distracting
     const productiveCategories = ['work', 'productivity', 'development'];
+    const distractionCategories = ['distraction', 'social', 'entertainment'];
+    const otherCategories = ['other', 'system'];
+    
     const productiveTime = data
       .filter(item => productiveCategories.includes(item.category))
       .reduce((sum, item) => sum + item.duration, 0);
     
-    const distractionTime = totalActiveTime - productiveTime;
+    const distractionTime = data
+      .filter(item => distractionCategories.includes(item.category))
+      .reduce((sum, item) => sum + item.duration, 0);
+    
+    const otherTime = data
+      .filter(item => otherCategories.includes(item.category))
+      .reduce((sum, item) => sum + item.duration, 0);
     
     // Calculate focus time (sessions longer than 25 minutes)
     const focusTime = data
@@ -458,6 +472,7 @@ class AppTrackingService {
       productiveTime,
       focusTime,
       distractionTime,
+      otherTime,
       topApps,
       productivityScore,
       dailyPattern
@@ -470,6 +485,7 @@ class AppTrackingService {
       productiveTime: 0,
       focusTime: 0,
       distractionTime: 0,
+      otherTime: 0,
       topApps: [],
       productivityScore: 0,
       dailyPattern: Array.from({ length: 24 }, (_, hour) => ({ hour, activity: 0 }))
@@ -588,6 +604,34 @@ class AppTrackingService {
     } else {
       console.error('💥 Still cannot access real tracking after restart');
     }
+  }
+
+  // Distraction notification methods
+  public setDistractionNotifications(enabled: boolean, thresholdMinutes: number = 30): void {
+    this.settings.distractionNotifications = enabled;
+    this.settings.distractionThresholdMinutes = thresholdMinutes;
+    this.saveSettings();
+    
+    // Update the main process tracking
+    if (window.electronAPI?.setDistractionNotifications) {
+      window.electronAPI.setDistractionNotifications(enabled, thresholdMinutes);
+    }
+    
+    console.log(`🚨 Distraction notifications ${enabled ? 'enabled' : 'disabled'} with ${thresholdMinutes}m threshold`);
+  }
+
+  public getDistractionSettings(): { enabled: boolean; thresholdMinutes: number } {
+    return {
+      enabled: this.settings.distractionNotifications,
+      thresholdMinutes: this.settings.distractionThresholdMinutes
+    };
+  }
+
+  public async getCurrentDistractionTime(): Promise<number> {
+    if (window.electronAPI?.getCurrentDistractionTime) {
+      return window.electronAPI.getCurrentDistractionTime();
+    }
+    return Promise.resolve(0);
   }
 
   public cleanup(): void {

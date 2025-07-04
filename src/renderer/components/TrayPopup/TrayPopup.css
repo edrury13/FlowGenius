@@ -1,41 +1,55 @@
 .tray-popup {
-  width: 350px;
-  height: 450px;
-  background: #ffffff;
+  width: 450px;
+  height: 500px;
+  background: #f8f9fa;
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  border: 1px solid #e1e5e9;
+  border: 1px solid rgba(0, 0, 0, 0.08);
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   display: flex;
   flex-direction: column;
+  position: relative;
+  box-sizing: border-box;
 }
 
+/* Enhanced header with gradient and better spacing */
 .tray-popup-header {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  padding: 16px 20px;
+  padding: 12px 16px;
   text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
 }
 
 .tray-popup-header h2 {
-  margin: 0 0 4px 0;
-  font-size: 18px;
+  margin: 0 0 2px 0;
+  font-size: 16px;
   font-weight: 600;
+  letter-spacing: -0.5px;
 }
 
 .tray-popup-date {
-  font-size: 14px;
-  opacity: 0.9;
+  font-size: 13px;
+  opacity: 0.95;
   font-weight: 400;
+  letter-spacing: -0.2px;
 }
 
+/* Main content area with better padding */
 .tray-popup-content {
   flex: 1;
-  padding: 16px;
+  padding: 12px;
   overflow-y: auto;
+  overflow-x: hidden;
+  background: #f8f9fa;
+  min-height: 0;
 }
 
+/* Quick action buttons with modern design */
 .quick-actions {
   display: flex;
   gap: 8px;
@@ -44,121 +58,79 @@
 
 .quick-action-btn {
   flex: 1;
-  padding: 12px 16px;
+  padding: 10px 12px;
   border: none;
   border-radius: 8px;
-  background: #f8f9fa;
+  background: white;
   color: #495057;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   align-items: center;
   gap: 8px;
   justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .quick-action-btn:hover {
-  background: #e9ecef;
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-.quick-action-btn.add-event {
-  background: #28a745;
+.quick-action-btn.view-calendar {
+  background: white;
+  color: #667eea;
+  border: 1.5px solid #e3e7ff;
+}
+
+.quick-action-btn.view-calendar:hover {
+  background: #f0f3ff;
+  border-color: #667eea;
+}
+
+.quick-action-btn.ai-assistant {
+  background: #667eea;
   color: white;
+  border: 1.5px solid #667eea;
 }
 
-.quick-action-btn.add-event:hover {
-  background: #218838;
+.quick-action-btn.ai-assistant:hover {
+  background: #5a67d8;
+  border-color: #5a67d8;
 }
 
 .quick-action-btn .icon {
   font-size: 16px;
 }
 
-.quick-add-form {
-  background: #f8f9fa;
-  border-radius: 8px;
-  padding: 16px;
-  margin-bottom: 16px;
-  border: 1px solid #e9ecef;
-}
-
-.quick-add-form input {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid #ced4da;
-  border-radius: 6px;
-  font-size: 14px;
-  margin-bottom: 12px;
-  box-sizing: border-box;
-}
-
-.quick-add-form input:focus {
-  outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
-}
-
-.quick-add-buttons {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.btn-primary {
-  background: #667eea;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s ease;
-}
-
-.btn-primary:hover {
-  background: #5a67d8;
-}
-
-.btn-secondary {
-  background: #6c757d;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s ease;
-}
-
-.btn-secondary:hover {
-  background: #5a6268;
-}
-
+/* Today's events section with better styling */
 .today-events {
   margin-top: 16px;
 }
 
 .today-events h3 {
   margin: 0 0 12px 0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
   color: #343a40;
+  letter-spacing: -0.3px;
 }
 
 .no-events {
-  text-align: center;
+  background: white;
+  border-radius: 8px;
   padding: 24px;
-  color: #6c757d;
+  text-align: center;
+  color: #8b92a0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .no-events p {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .events-list {
@@ -171,17 +143,26 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px;
-  background: #f8f9fa;
+  padding: 10px 12px;
+  background: white;
   border-radius: 8px;
-  border-left: 4px solid #667eea;
+  border-left: 3px solid #667eea;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.event-item:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
+  transform: translateX(2px);
 }
 
 .event-time {
   font-size: 12px;
   font-weight: 600;
-  color: #495057;
-  min-width: 60px;
+  color: #667eea;
+  min-width: 55px;
+  letter-spacing: -0.2px;
 }
 
 .event-details {
@@ -189,63 +170,291 @@
 }
 
 .event-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  color: #212529;
+  color: #2d3748;
   margin-bottom: 2px;
+  line-height: 1.3;
 }
 
 .event-location {
-  font-size: 12px;
-  color: #6c757d;
+  font-size: 11px;
+  color: #718096;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.event-location::before {
+  content: '📍';
+  font-size: 10px;
 }
 
 .more-events {
   text-align: center;
-  padding: 8px;
-  color: #6c757d;
   font-size: 12px;
-  font-style: italic;
+  color: #667eea;
+  font-weight: 500;
+  padding: 6px;
+  cursor: pointer;
+  transition: color 0.2s ease;
 }
 
+.more-events:hover {
+  color: #5a67d8;
+}
+
+/* Footer with better styling */
 .tray-popup-footer {
-  padding: 16px;
-  border-top: 1px solid #e9ecef;
-  background: #f8f9fa;
+  padding: 10px 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  background: white;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.03);
+  flex-shrink: 0;
 }
 
 .open-main-app {
   width: 100%;
-  padding: 12px;
-  background: #343a40;
+  padding: 10px 16px;
+  background: #667eea;
   color: white;
   border: none;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: all 0.2s ease;
+  letter-spacing: -0.2px;
+  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
 }
 
 .open-main-app:hover {
-  background: #23272b;
+  background: #5a67d8;
+  box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+  transform: translateY(-1px);
 }
 
-/* Scrollbar styling */
+/* Custom scrollbar */
 .tray-popup-content::-webkit-scrollbar {
   width: 6px;
 }
 
 .tray-popup-content::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
+  background: transparent;
 }
 
 .tray-popup-content::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
+  background: #d1d5db;
   border-radius: 3px;
 }
 
 .tray-popup-content::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
-} 
+  background: #9ca3af;
+}
+
+/* Enhanced AI Assistant View */
+.ai-assistant-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.view-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+.back-btn {
+  background: white;
+  border: 1px solid #e5e7eb;
+  color: #667eea;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 5px;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.back-btn:hover {
+  background: #f0f3ff;
+  border-color: #667eea;
+  transform: translateX(-2px);
+}
+
+.view-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #343a40;
+  flex: 1;
+  letter-spacing: -0.3px;
+}
+
+.ai-assistant-container {
+  flex: 1;
+  margin: 10px -12px -12px -12px;
+  background: white;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+  position: relative;
+}
+
+.ai-assistant-container > * {
+  height: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Compact mode specific styles for better UI in tray */
+.ai-assistant-view .MuiPaper-root {
+  box-shadow: none !important;
+  margin: 0 !important;
+}
+
+.ai-assistant-view .MuiDrawer-paper {
+  background: transparent !important;
+}
+
+/* Fix chat interface to fit in tray window */
+.ai-assistant-container .MuiBox-root {
+  max-height: 100% !important;
+}
+
+.ai-assistant-container .MuiContainer-root {
+  height: 100% !important;
+  padding: 0 !important;
+  max-width: 100% !important;
+}
+
+/* Fix the main chat container */
+.ai-assistant-container > div > div:first-child {
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+/* Fix the messages area */
+.ai-assistant-container > div > div:first-child > div:first-child {
+  flex: 1 !important;
+  overflow-y: auto !important;
+  padding: 8px !important;
+}
+
+/* Remove any extra spacing from the chat interface */
+.ai-assistant-container > div {
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+/* Make the message area background consistent */
+.ai-assistant-container .MuiBox-root[style*="grey.50"] {
+  background-color: #ffffff !important;
+}
+
+/* Reduce message padding in compact mode */
+.ai-assistant-container .MuiPaper-root {
+  padding: 8px !important;
+}
+
+/* Fix input area at bottom */
+.ai-assistant-container .MuiPaper-root:last-child {
+  position: sticky !important;
+  bottom: 0 !important;
+  z-index: 10 !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+}
+
+/* Compact the input area */
+.ai-assistant-container .MuiTextField-root {
+  margin: 0 !important;
+}
+
+.ai-assistant-container .MuiInputBase-root {
+  padding: 8px 12px !important;
+  font-size: 13px !important;
+}
+
+/* Compact the header */
+.ai-assistant-container .MuiPaper-root:first-child {
+  padding: 8px 12px !important;
+}
+
+/* Fix any scrollbar issues */
+.ai-assistant-container ::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ai-assistant-container ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ai-assistant-container ::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.ai-assistant-container ::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* Animation for view transitions */
+.ai-assistant-view,
+.quick-event-view {
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Loading state */
+.loading-events {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: #667eea;
+}
+
+.loading-events::after {
+  content: '';
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  margin-left: 10px;
+  border: 2px solid #667eea;
+  border-radius: 50%;
+  border-top-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

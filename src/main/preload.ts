@@ -75,6 +75,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getTodayEvents: () => ipcRenderer.invoke('get-today-events'),
   createEvent: (event: any) => ipcRenderer.invoke('create-event', event),
   
+  // Distraction notification methods
+  setDistractionNotifications: (enabled: boolean, thresholdMinutes: number) => 
+    ipcRenderer.invoke('set-distraction-notifications', enabled, thresholdMinutes),
+  getDistractionSettings: () => ipcRenderer.invoke('get-distraction-settings'),
+  getCurrentDistractionTime: () => ipcRenderer.invoke('get-current-distraction-time'),
+  onDistractionNotification: (callback: (data: { title: string; message: string; duration: number }) => void) => 
+    ipcRenderer.on('distraction-notification', (_event, data) => callback(data)),
+  
+  // Event updates from main process
+  onEventsUpdated: (callback: (events: any[]) => void) => 
+    ipcRenderer.on('events-updated', (_event, events) => callback(events)),
+  
   // Remove listeners
   removeAllListeners: (channel: string) => 
     ipcRenderer.removeAllListeners(channel),
@@ -108,6 +120,11 @@ console.log('🔧 PRELOAD: Available methods:', Object.keys({
   openCalendar: true,
   getTodayEvents: true,
   createEvent: true,
+  setDistractionNotifications: true,
+  getDistractionSettings: true,
+  getCurrentDistractionTime: true,
+  onDistractionNotification: true,
+  onEventsUpdated: true,
   removeAllListeners: true,
 }));
 
@@ -163,6 +180,11 @@ declare global {
       openCalendar: () => Promise<void>;
       getTodayEvents: () => Promise<any[]>;
       createEvent: (event: any) => Promise<any>;
+      setDistractionNotifications: (enabled: boolean, thresholdMinutes: number) => Promise<void>;
+      getDistractionSettings: () => Promise<{ enabled: boolean; thresholdMinutes: number }>;
+      getCurrentDistractionTime: () => Promise<number>;
+      onDistractionNotification: (callback: (data: { title: string; message: string; duration: number }) => void) => void;
+      onEventsUpdated: (callback: (events: any[]) => void) => void;
       removeAllListeners: (channel: string) => void;
     };
   }

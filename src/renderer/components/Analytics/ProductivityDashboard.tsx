@@ -310,11 +310,11 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
   } : null;
 
   const categoryChartData = metrics ? {
-    labels: ['Productive', 'Distraction'],
+    labels: ['Productive', 'Distraction', 'Other'],
     datasets: [
       {
-        data: [metrics.productiveTime, metrics.distractionTime],
-        backgroundColor: ['#4caf50', '#f44336'],
+        data: [metrics.productiveTime, metrics.distractionTime, metrics.otherTime],
+        backgroundColor: ['#4caf50', '#f44336', '#ff9800'],
         borderWidth: 0,
       },
     ],
@@ -405,6 +405,52 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
                         value={settings?.idleThresholdMinutes || 5}
                         onChange={(e) => handleSettingsUpdate({ idleThresholdMinutes: Number(e.target.value) })}
                       />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Distraction Notifications */}
+              <div style={styles.card}>
+                <h3 style={styles.cardTitle}>🚨 Distraction Notifications</h3>
+                <div style={styles.settingsGrid}>
+                  <div>
+                    <label style={styles.checkbox}>
+                      <input
+                        type="checkbox"
+                        checked={settings?.distractionNotifications || false}
+                        onChange={(e) => {
+                          const enabled = e.target.checked;
+                          handleSettingsUpdate({ distractionNotifications: enabled });
+                          trackingService.setDistractionNotifications(enabled, settings?.distractionThresholdMinutes || 30);
+                        }}
+                      />
+                      Enable distraction alerts
+                    </label>
+                    <div style={{ fontSize: '12px', color: '#666', marginLeft: '20px', marginTop: '4px' }}>
+                      Get notified when using distracting apps for too long
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ marginTop: '8px' }}>
+                      <label>Alert threshold (minutes): </label>
+                      <input
+                        style={styles.input}
+                        type="number"
+                        min="5"
+                        max="120"
+                        value={settings?.distractionThresholdMinutes || 30}
+                        onChange={(e) => {
+                          const threshold = Number(e.target.value);
+                          handleSettingsUpdate({ distractionThresholdMinutes: threshold });
+                          if (settings?.distractionNotifications) {
+                            trackingService.setDistractionNotifications(true, threshold);
+                          }
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
+                      Time before notification appears
                     </div>
                   </div>
                 </div>
@@ -509,6 +555,10 @@ const ProductivityDashboard: React.FC<ProductivityDashboardProps> = ({ isVisible
                       <div style={styles.metric}>
                         <span>Distraction Time:</span>
                         <span style={styles.metricValue}>{formatDuration(metrics.distractionTime)}</span>
+                      </div>
+                      <div style={styles.metric}>
+                        <span>Other Time:</span>
+                        <span style={styles.metricValue}>{formatDuration(metrics.otherTime)}</span>
                       </div>
                     </div>
 

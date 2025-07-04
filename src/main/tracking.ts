@@ -29,21 +29,56 @@ class WindowsAppTracker {
   private trackingInterval: NodeJS.Timeout | null = null;
   private isTracking = false;
   private hasShownPermissionError = false;
+  
+  // Distraction notification system
+  private distractionStartTime: Date | null = null;
+  private distractionNotificationInterval: NodeJS.Timeout | null = null;
+  private distractionSettings = {
+    enabled: false,
+    thresholdMinutes: 30,
+    notificationTitle: 'FlowGenius - Distraction Alert',
+    notificationMessage: 'You\'ve been using distracting apps for {duration}. Consider taking a break or switching to productive work.'
+  };
 
-  // App categorization - ONLY for apps that commonly exist
+  // App categorization with improved AI detection
   private appCategories: { [key: string]: string } = {
-    // Development
+    // Development Tools
     'code': 'development',
+    'cursor': 'development',  // Add Cursor as development
     'devenv': 'development',
     'cmd': 'development',
     'powershell': 'development',
-    'notepad': 'productivity',
+    'powershell_ise': 'development',
+    'git': 'development',
+    'node': 'development',
+    'npm': 'development',
+    'python': 'development',
+    'java': 'development',
+    'javaw': 'development',
+    'dotnet': 'development',
+    'sublime_text': 'development',
+    'notepad++': 'development',
+    'atom': 'development',
+    'webstorm': 'development',
+    'intellij': 'development',
+    'pycharm': 'development',
+    'android studio': 'development',
+    'unity': 'development',
+    'unreal': 'development',
+    'xcode': 'development',
+    'docker': 'development',
+    'vagrant': 'development',
+    'vmware': 'development',
+    'virtualbox': 'development',
     
-    // Web Browsers
-    'chrome': 'web',
-    'firefox': 'web',
-    'msedge': 'web',
-    'iexplore': 'web',
+    // Web Browsers - moved to 'other' category
+    'chrome': 'other',
+    'firefox': 'other',
+    'msedge': 'other',
+    'iexplore': 'other',
+    'safari': 'other',
+    'opera': 'other',
+    'brave': 'other',
     
     // Office/Productivity
     'winword': 'productivity',
@@ -51,14 +86,70 @@ class WindowsAppTracker {
     'powerpnt': 'productivity',
     'outlook': 'productivity',
     'onenote': 'productivity',
+    'notepad': 'productivity',
+    'teams': 'productivity',
+    'slack': 'productivity',
+    'zoom': 'productivity',
+    'discord': 'productivity',
+    'notion': 'productivity',
+    'obsidian': 'productivity',
+    'evernote': 'productivity',
+    'airtable': 'productivity',
+    'trello': 'productivity',
+    'asana': 'productivity',
+    'figma': 'productivity',
+    'sketch': 'productivity',
+    'photoshop': 'productivity',
+    'illustrator': 'productivity',
+    'premiere': 'productivity',
+    'aftereffects': 'productivity',
+    'blender': 'productivity',
+    'gimp': 'productivity',
+    'inkscape': 'productivity',
     
     // System
     'explorer': 'system',
     'taskmgr': 'system',
     'regedit': 'system',
+    'services': 'system',
+    'mmc': 'system',
+    'eventvwr': 'system',
+    'perfmon': 'system',
+    'msconfig': 'system',
+    'control': 'system',
     
     // FlowGenius
     'flowgenius': 'productivity',
+    
+    // Entertainment/Distractions
+    'spotify': 'distraction',
+    'netflix': 'distraction',
+    'steam': 'distraction',
+    'origin': 'distraction',
+    'epicgames': 'distraction',
+    'twitch': 'distraction',
+    'youtube': 'distraction',
+    'tiktok': 'distraction',
+    'instagram': 'distraction',
+    'facebook': 'distraction',
+    'twitter': 'distraction',
+    'reddit': 'distraction',
+    'whatsapp': 'distraction',
+    'telegram': 'distraction',
+    'snapchat': 'distraction',
+    'vlc': 'distraction',
+    'mediaplayer': 'distraction',
+    'itunes': 'distraction',
+    'winamp': 'distraction',
+    'games': 'distraction',
+    'minecraft': 'distraction',
+    'fortnite': 'distraction',
+    'valorant': 'distraction',
+    'leagueoflegends': 'distraction',
+    'dota2': 'distraction',
+    'csgo': 'distraction',
+    'overwatch': 'distraction',
+    'apex': 'distraction',
   };
 
   constructor() {
@@ -166,6 +257,9 @@ class WindowsAppTracker {
     if (this.currentSession) {
       this.endCurrentSession();
     }
+    
+    // Clean up distraction tracking
+    this.stopDistractionTracking();
     
     console.log('📊 Stopped Windows app tracking');
   }
@@ -298,6 +392,80 @@ class WindowsAppTracker {
       duration: 0,
       category
     };
+    
+    // Handle distraction tracking
+    this.handleDistractionTracking(category);
+  }
+
+  private handleDistractionTracking(category: string): void {
+    if (!this.distractionSettings.enabled) return;
+    
+    if (category === 'distraction') {
+      // Starting distraction activity
+      if (!this.distractionStartTime) {
+        this.distractionStartTime = new Date();
+        console.log('🚨 Started distraction tracking');
+        
+        // Set up notification timer
+        this.scheduleDistractionNotification();
+      }
+    } else {
+      // Ending distraction activity
+      this.stopDistractionTracking();
+    }
+  }
+
+  private scheduleDistractionNotification(): void {
+    // Clear any existing notification timer
+    if (this.distractionNotificationInterval) {
+      clearInterval(this.distractionNotificationInterval);
+    }
+    
+    // Schedule notification
+    const intervalMs = this.distractionSettings.thresholdMinutes * 60 * 1000;
+    this.distractionNotificationInterval = setTimeout(() => {
+      this.sendDistractionNotification();
+    }, intervalMs);
+  }
+
+  private sendDistractionNotification(): void {
+    if (!this.distractionStartTime) return;
+    
+    const now = new Date();
+    const durationMs = now.getTime() - this.distractionStartTime.getTime();
+    const durationMinutes = Math.floor(durationMs / 60000);
+    
+    const message = this.distractionSettings.notificationMessage.replace(
+      '{duration}',
+      durationMinutes >= 60 
+        ? `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`
+        : `${durationMinutes}m`
+    );
+    
+    // Send notification to main window
+    if (global.mainWindow && !global.mainWindow.isDestroyed()) {
+      global.mainWindow.webContents.send('distraction-notification', {
+        title: this.distractionSettings.notificationTitle,
+        message: message,
+        duration: durationMinutes
+      });
+    }
+    
+    console.log(`🚨 Distraction notification sent: ${durationMinutes}m`);
+  }
+
+  private stopDistractionTracking(): void {
+    if (this.distractionStartTime) {
+      const duration = new Date().getTime() - this.distractionStartTime.getTime();
+      console.log(`🚨 Stopped distraction tracking after ${Math.floor(duration / 60000)}m`);
+      
+      this.distractionStartTime = null;
+      
+      if (this.distractionNotificationInterval) {
+        clearTimeout(this.distractionNotificationInterval);
+        this.distractionNotificationInterval = null;
+      }
+    }
   }
 
   private endCurrentSession(): void {
@@ -323,11 +491,78 @@ class WindowsAppTracker {
     
     console.log(`🔍 categorizeApp input: "${lowerName}"`);
     
-    // ONLY use exact matches to avoid false positives
-    const category = this.appCategories[lowerName] || 'other';
+    // First try exact matches
+    let category = this.appCategories[lowerName];
+    
+    // If no exact match, use intelligent pattern matching
+    if (!category) {
+      category = this.detectCategoryByPattern(lowerName) || 'other';
+    }
     
     console.log(`🔍 categorizeApp output: "${category}"`);
     return category;
+  }
+
+  private detectCategoryByPattern(processName: string): string | null {
+    // Development patterns
+    const devPatterns = [
+      /code|cursor|editor|ide|develop|studio|git|npm|node|python|java|dotnet|compiler|debug|terminal|cmd|powershell/i,
+      /visual.*studio|android.*studio|intellij|pycharm|webstorm|phpstorm|rubymine|clion|datagrip|rider|appcode/i,
+      /sublime|atom|notepad\+\+|vim|emacs|nano|brackets|gedit|textmate|ultraedit|editplus/i,
+      /unity|unreal|godot|construct|gamemaker|blender|maya|3ds.*max|cinema.*4d|zbrush|substance/i,
+      /docker|vagrant|virtualbox|vmware|hyper-v|kubernetes|kubectl|helm|terraform|ansible/i
+    ];
+    
+    // Productivity patterns
+    const productivityPatterns = [
+      /office|word|excel|powerpoint|outlook|onenote|teams|slack|zoom|discord|skype|telegram|whatsapp/i,
+      /notion|obsidian|evernote|trello|asana|monday|jira|confluence|sharepoint|onenote/i,
+      /figma|sketch|photoshop|illustrator|indesign|premiere|aftereffects|davinci|resolve|canva/i,
+      /acrobat|reader|pdf|calibre|kindle|audible|calculator|notepad|wordpad|paint/i
+    ];
+    
+    // Distraction patterns
+    const distractionPatterns = [
+      /spotify|music|itunes|winamp|vlc|media.*player|netflix|hulu|disney|amazon.*prime|youtube/i,
+      /steam|origin|epic.*games|battle\.net|uplay|gog|minecraft|fortnite|valorant|league.*of.*legends|dota|csgo|overwatch|apex/i,
+      /instagram|facebook|twitter|tiktok|snapchat|pinterest|reddit|tumblr|linkedin|discord/i,
+      /twitch|mixer|obs|streamlabs|xsplit|bandicam|fraps|nvidia.*shadowplay/i,
+      /solitaire|minesweeper|candy.*crush|angry.*birds|temple.*run|clash.*of.*clans|pokemon.*go/i
+    ];
+    
+    // System patterns
+    const systemPatterns = [
+      /explorer|taskmgr|regedit|services|mmc|eventvwr|perfmon|msconfig|control|system|settings/i,
+      /windows|microsoft|update|installer|setup|uninstall|driver|hardware|device.*manager/i
+    ];
+    
+    // Check patterns in order of priority
+    if (devPatterns.some(pattern => pattern.test(processName))) {
+      return 'development';
+    }
+    
+    if (productivityPatterns.some(pattern => pattern.test(processName))) {
+      return 'productivity';
+    }
+    
+    if (distractionPatterns.some(pattern => pattern.test(processName))) {
+      return 'distraction';
+    }
+    
+    if (systemPatterns.some(pattern => pattern.test(processName))) {
+      return 'system';
+    }
+    
+    // Check for browser patterns separately for 'other' category
+    const browserPatterns = [
+      /chrome|firefox|safari|edge|opera|brave|internet.*explorer|vivaldi|tor/i
+    ];
+    
+    if (browserPatterns.some(pattern => pattern.test(processName))) {
+      return 'other';
+    }
+    
+    return null; // No pattern matched
   }
 
   private saveSession(session: AppUsageSession): void {
@@ -418,6 +653,34 @@ class WindowsAppTracker {
 
   public isCurrentlyTracking(): boolean {
     return this.isTracking;
+  }
+
+  // Distraction notification settings
+  public setDistractionNotifications(enabled: boolean, thresholdMinutes: number = 30): void {
+    this.distractionSettings.enabled = enabled;
+    this.distractionSettings.thresholdMinutes = thresholdMinutes;
+    
+    console.log(`🚨 Distraction notifications ${enabled ? 'enabled' : 'disabled'} with ${thresholdMinutes}m threshold`);
+    
+    // If disabled, stop any current tracking
+    if (!enabled) {
+      this.stopDistractionTracking();
+    }
+  }
+
+  public getDistractionSettings(): { enabled: boolean; thresholdMinutes: number } {
+    return {
+      enabled: this.distractionSettings.enabled,
+      thresholdMinutes: this.distractionSettings.thresholdMinutes
+    };
+  }
+
+  public getCurrentDistractionTime(): number {
+    if (!this.distractionStartTime) return 0;
+    
+    const now = new Date();
+    const durationMs = now.getTime() - this.distractionStartTime.getTime();
+    return Math.floor(durationMs / 60000); // Return minutes
   }
 }
 

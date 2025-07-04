@@ -18,7 +18,11 @@ import {
   ListItem,
   ListItemText,
   Divider,
-  useTheme
+  useTheme,
+  Radio,
+  RadioGroup,
+  FormControlLabel,
+  FormControl
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -41,28 +45,41 @@ interface ChatInterfaceProps {
   onEventCreate: (eventData: EventFormData) => Promise<void>;
   onClose?: () => void;
   className?: string;
+  isCompactMode?: boolean;
+  selectedDate?: Date;
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   events,
   onEventCreate,
   onClose,
-  className
+  className,
+  isCompactMode = false,
+  selectedDate
 }) => {
   const theme = useTheme();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [aiService] = useState(() => new AIAssistantService());
+  const [selectedLocations, setSelectedLocations] = useState<Map<string, string>>(new Map());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // Welcome message
+    const dateContext = selectedDate ? ` for ${selectedDate.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      month: 'long', 
+      day: 'numeric' 
+    })}` : '';
+    
     const welcomeMessage: ChatMessage = {
       id: 'welcome',
       type: 'assistant',
-      content: `Hi! 👋 I'm your AI scheduling assistant. I can help you schedule events by understanding natural language descriptions.
+      content: isCompactMode 
+        ? `Hi! I can help you schedule events${dateContext}. Try: "Meeting with John tomorrow at 2pm"`
+        : `Hi! 👋 I'm your AI scheduling assistant. I can help you schedule events${dateContext} by understanding natural language descriptions.
 
 Try saying something like:
 • "Schedule a team meeting next Tuesday"
@@ -74,7 +91,7 @@ What would you like to schedule?`,
       timestamp: new Date()
     };
     setMessages([welcomeMessage]);
-  }, []);
+  }, [isCompactMode, selectedDate]);
 
   useEffect(() => {
     scrollToBottom();
@@ -91,8 +108,17 @@ What would you like to schedule?`,
     setInputValue('');
     setIsLoading(true);
 
+    // Add user message to chat
+    const userMsg: ChatMessage = {
+      id: `user_${Date.now()}`,
+      type: 'user',
+      content: userMessage,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, userMsg]);
+
     try {
-      const aiResponse = await aiService.processMessage(userMessage, events);
+      const aiResponse = await aiService.processMessage(userMessage, events, selectedDate);
       setMessages(prev => [...prev, aiResponse]);
     } catch (error) {
       console.error('Failed to process message:', error);
@@ -115,14 +141,21 @@ What would you like to schedule?`,
     }
   };
 
+  const handleLocationSelect = (suggestionId: string, locationName: string) => {
+    setSelectedLocations(prev => new Map(prev.set(suggestionId, locationName)));
+  };
+
   const handleCreateEvent = async (eventData: Partial<EventFormData>, suggestion: EventSuggestion) => {
     if (eventData.title && eventData.startTime && eventData.endTime) {
+      // Get the selected location for this suggestion
+      const selectedLocation = selectedLocations.get(suggestion.id) || eventData.location || '';
+      
       const fullEventData: EventFormData = {
         title: eventData.title,
         description: eventData.description || '',
         startTime: eventData.startTime,
         endTime: eventData.endTime,
-        location: eventData.location || '',
+        location: selectedLocation,
         attendees: eventData.attendees || [],
         isRecurring: eventData.isRecurring || false,
         recurrenceRule: eventData.recurrenceRule
@@ -135,7 +168,7 @@ What would you like to schedule?`,
         const confirmMessage: ChatMessage = {
           id: `confirm_${Date.now()}`,
           type: 'assistant',
-          content: `✅ Great! I've created "${eventData.title}" for ${eventData.startTime.toLocaleString()}. The event has been added to your calendar!`,
+          content: `✅ Created "${eventData.title}" for ${eventData.startTime.toLocaleString()}${selectedLocation ? ` at ${selectedLocation}` : ''}!`,
           timestamp: new Date()
         };
         setMessages(prev => [...prev, confirmMessage]);
@@ -154,12 +187,14 @@ What would you like to schedule?`,
   };
 
   const handleUseTimeSlot = async (suggestion: EventSuggestion, timeSlot: any) => {
+    const selectedLocation = selectedLocations.get(suggestion.id) || suggestion.suggestedLocation || '';
+    
     const eventData: Partial<EventFormData> = {
       title: suggestion.title,
       description: suggestion.description,
       startTime: timeSlot.startTime,
       endTime: timeSlot.endTime,
-      location: suggestion.suggestedLocation,
+      location: selectedLocation,
       attendees: suggestion.suggestedInvitees || [],
       isRecurring: false
     };
@@ -168,6 +203,24 @@ What would you like to schedule?`,
   };
 
   const formatTimeSlot = (timeSlot: any) => {
+    if (isCompactMode) {
+      const time = `${timeSlot.startTime.toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      })} - ${timeSlot.endTime.toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      })}`;
+      const date = timeSlot.startTime.toLocaleDateString('en-US', { 
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric'
+      });
+      return `${date} ${time}`;
+    }
+    
     const day = timeSlot.startTime.toLocaleDateString('en-US', { weekday: 'long' });
     const date = timeSlot.startTime.toLocaleDateString();
     const time = `${timeSlot.startTime.toLocaleTimeString('en-US', { 
@@ -193,35 +246,39 @@ What would you like to schedule?`,
           display: 'flex',
           flexDirection: isUser ? 'row-reverse' : 'row',
           alignItems: 'flex-start',
-          mb: 2,
+          mb: isCompactMode ? 1 : 2,
           gap: 1
         }}
       >
         <Avatar
           sx={{
             bgcolor: isUser ? theme.palette.primary.main : theme.palette.secondary.main,
-            width: 32,
-            height: 32
+            width: isCompactMode ? 24 : 32,
+            height: isCompactMode ? 24 : 32
           }}
         >
-          {isUser ? <PersonIcon fontSize="small" /> : <SmartIcon fontSize="small" />}
+          {isUser ? 
+            <PersonIcon fontSize={isCompactMode ? 'small' : 'small'} /> : 
+            <SmartIcon fontSize={isCompactMode ? 'small' : 'small'} />
+          }
         </Avatar>
         
-        <Box sx={{ maxWidth: '75%', minWidth: '200px' }}>
+        <Box sx={{ maxWidth: isCompactMode ? '85%' : '75%', minWidth: isCompactMode ? '150px' : '200px' }}>
           <Paper
             elevation={1}
             sx={{
-              p: 2,
+              p: isCompactMode ? 1 : 2,
               bgcolor: isUser ? theme.palette.primary.light : theme.palette.grey[100],
               color: isUser ? theme.palette.primary.contrastText : theme.palette.text.primary,
-              borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px'
+              borderRadius: isUser ? '12px 12px 4px 12px' : '12px 12px 12px 4px'
             }}
           >
             <Typography
-              variant="body1"
+              variant={isCompactMode ? 'body2' : 'body1'}
               sx={{
                 whiteSpace: 'pre-wrap',
-                lineHeight: 1.5
+                lineHeight: 1.4,
+                fontSize: isCompactMode ? '0.8rem' : undefined
               }}
             >
               {message.content}
@@ -232,8 +289,8 @@ What would you like to schedule?`,
               sx={{
                 opacity: 0.7,
                 display: 'block',
-                mt: 1,
-                fontSize: '0.75rem'
+                mt: 0.5,
+                fontSize: isCompactMode ? '0.65rem' : '0.75rem'
               }}
             >
               {message.timestamp.toLocaleTimeString('en-US', { 
@@ -246,179 +303,140 @@ What would you like to schedule?`,
 
           {/* Render event suggestions */}
           {message.suggestions && message.suggestions.length > 0 && (
-            <Box sx={{ mt: 2 }}>
+            <Box sx={{ mt: isCompactMode ? 1 : 2 }}>
               {message.suggestions.map((suggestion) => (
-                <Card key={suggestion.id} sx={{ mb: 2, borderRadius: 3 }}>
-                  <CardContent sx={{ pb: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                      <EventIcon color="primary" sx={{ mr: 1.5 }} />
-                      <Typography variant="h6" component="div" sx={{ fontWeight: 600 }}>
+                <Card key={suggestion.id} sx={{ 
+                  mb: isCompactMode ? 1 : 2, 
+                  borderRadius: 2,
+                  border: isCompactMode ? '1px solid' : undefined,
+                  borderColor: isCompactMode ? 'divider' : undefined,
+                  boxShadow: isCompactMode ? 1 : undefined
+                }}>
+                  <CardContent sx={{ p: isCompactMode ? 1 : 2, '&:last-child': { pb: isCompactMode ? 1 : 2 } }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: isCompactMode ? 1 : 2 }}>
+                      <EventIcon color="primary" sx={{ mr: 1, fontSize: isCompactMode ? 'small' : undefined }} />
+                      <Typography variant={isCompactMode ? 'subtitle2' : 'h6'} component="div" sx={{ fontWeight: 600 }}>
                         {suggestion.title}
                       </Typography>
                       <Chip 
-                        label={`${Math.round(suggestion.confidence * 100)}% confident`}
+                        label={`${Math.round(suggestion.confidence * 100)}%`}
                         size="small"
                         color="primary"
                         variant="outlined"
-                        sx={{ ml: 'auto', fontWeight: 500 }}
+                        sx={{ ml: 'auto', fontWeight: 500, fontSize: isCompactMode ? '0.65rem' : undefined }}
                       />
                     </Box>
 
-                    <Box sx={{ display: 'flex', gap: 3, mb: 3, flexWrap: 'wrap' }}>
-                      {suggestion.suggestedLocation && (
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <LocationIcon fontSize="small" color="action" sx={{ mr: 0.5 }} />
-                          <Typography variant="body2" color="text.secondary">
-                            {suggestion.suggestedLocation}
-                          </Typography>
-                        </Box>
-                      )}
-
-                      {suggestion.suggestedInvitees && suggestion.suggestedInvitees.length > 0 && (
-                        <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <PeopleIcon fontSize="small" color="action" sx={{ mr: 0.5 }} />
-                          <Typography variant="body2" color="text.secondary">
-                            {suggestion.suggestedInvitees.join(', ')}
-                          </Typography>
-                        </Box>
-                      )}
-                    </Box>
-
-                    {/* Location Suggestions */}
+                    {/* Location Suggestions with Radio Buttons */}
                     {suggestion.locationSuggestions && suggestion.locationSuggestions.length > 0 && (
-                      <Box sx={{ mb: 3 }}>
-                        <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 600 }}>
-                          📍 Suggested Locations
+                      <Box sx={{ mb: isCompactMode ? 1 : 2 }}>
+                        <Typography variant={isCompactMode ? 'caption' : 'subtitle2'} sx={{ mb: 0.5, fontWeight: 600 }}>
+                          📍 Select Location
                         </Typography>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                          {suggestion.locationSuggestions.slice(0, 3).map((location, locIndex) => (
-                            <Box
-                              key={locIndex}
-                              sx={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                p: 1.5,
-                                border: '1px solid',
-                                borderColor: 'divider',
-                                borderRadius: 2,
-                                backgroundColor: 'background.paper',
-                                '&:hover': {
-                                  backgroundColor: 'action.hover',
-                                  borderColor: 'primary.main'
+                        <FormControl component="fieldset" sx={{ width: '100%' }}>
+                          <RadioGroup
+                            value={selectedLocations.get(suggestion.id) || ''}
+                            onChange={(e) => handleLocationSelect(suggestion.id, e.target.value)}
+                            sx={{ gap: 0.5 }}
+                          >
+                            {/* Option for no location */}
+                            <FormControlLabel
+                              value=""
+                              control={<Radio size={isCompactMode ? 'small' : 'medium'} />}
+                              label={
+                                <Typography variant={isCompactMode ? 'caption' : 'body2'}>
+                                  No location
+                                </Typography>
+                              }
+                              sx={{ margin: 0 }}
+                            />
+                            
+                            {/* Location options */}
+                            {suggestion.locationSuggestions.slice(0, 3).map((location, locIndex) => (
+                              <FormControlLabel
+                                key={locIndex}
+                                value={location.name}
+                                control={<Radio size={isCompactMode ? 'small' : 'medium'} />}
+                                label={
+                                  <Box>
+                                    <Typography variant={isCompactMode ? 'caption' : 'body2'} sx={{ fontWeight: 500 }}>
+                                      {location.name}
+                                    </Typography>
+                                    {!isCompactMode && (
+                                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                        {location.address}
+                                      </Typography>
+                                    )}
+                                  </Box>
                                 }
-                              }}
-                            >
-                              <Box sx={{ flex: 1 }}>
-                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                                  {location.name}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  {location.address}
-                                </Typography>
-                              </Box>
-                              <Box sx={{ display: 'flex', gap: 1 }}>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  startIcon={<LocationIcon />}
-                                  onClick={() => {
-                                    // Add location to event (this would need to be implemented)
-                                    console.log('Add location to event:', location);
-                                  }}
-                                  sx={{ textTransform: 'none' }}
-                                >
-                                  Add
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="contained"
-                                  startIcon={<LocationIcon />}
-                                  onClick={() => {
-                                    const googleMapsUrl = location.placeId 
-                                      ? `https://www.google.com/maps/place/?q=place_id:${location.placeId}`
-                                      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location.name + ' ' + (location.address || ''))}`;
-                                    window.open(googleMapsUrl, '_blank');
-                                  }}
-                                  sx={{ textTransform: 'none' }}
-                                >
-                                  View
-                                </Button>
-                              </Box>
-                            </Box>
-                          ))}
-                        </Box>
+                                sx={{ margin: 0, alignItems: 'flex-start' }}
+                              />
+                            ))}
+                          </RadioGroup>
+                        </FormControl>
                       </Box>
                     )}
 
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                      {suggestion.suggestedTimes.slice(0, 3).map((timeSlot, index) => (
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: isCompactMode ? 1 : 2 }}>
+                      {suggestion.suggestedTimes.slice(0, isCompactMode ? 2 : 3).map((timeSlot, index) => (
                         <Card
                           key={index}
                           variant="outlined"
                           sx={{
-                            p: 2,
+                            p: isCompactMode ? 1 : 2,
                             borderRadius: 2,
                             transition: 'all 0.2s ease-in-out',
                             '&:hover': {
-                              boxShadow: 2,
+                              boxShadow: isCompactMode ? 1 : 2,
                               borderColor: 'primary.main'
                             }
                           }}
                         >
-                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <Box sx={{ flex: 1 }}>
-                              <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
-                                {formatTimeSlot(timeSlot).split(' at ')[0]}
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
+                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Typography variant={isCompactMode ? 'caption' : 'body1'} sx={{ fontWeight: 500, mb: 0.5 }}>
+                                {formatTimeSlot(timeSlot)}
                               </Typography>
-                              <Typography variant="body1" color="primary" sx={{ fontWeight: 500, mb: 1 }}>
-                                {formatTimeSlot(timeSlot).split(' at ')[1]}
-                              </Typography>
-                              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                                <Chip
-                                  label={timeSlot.priority === 1 ? 'Best Option' : timeSlot.priority === 2 ? 'Good Option' : 'Available'}
-                                  size="small"
-                                  color={timeSlot.priority === 1 ? 'success' : timeSlot.priority === 2 ? 'warning' : 'default'}
-                                  sx={{ fontWeight: 500 }}
-                                />
-                                {timeSlot.optimalityScore && (
-                                  <Typography variant="caption" color="text.secondary">
-                                    {Math.round(timeSlot.optimalityScore * 100)}% optimal
-                                  </Typography>
-                                )}
-                              </Box>
+                              <Chip
+                                label={timeSlot.priority === 1 ? 'Best' : timeSlot.priority === 2 ? 'Good' : 'OK'}
+                                size="small"
+                                color={timeSlot.priority === 1 ? 'success' : timeSlot.priority === 2 ? 'warning' : 'default'}
+                                sx={{ fontWeight: 500, fontSize: isCompactMode ? '0.65rem' : undefined }}
+                              />
                             </Box>
                             <Button
                               variant="contained"
-                              startIcon={<MagicIcon />}
+                              size={isCompactMode ? 'small' : 'medium'}
                               onClick={() => handleUseTimeSlot(suggestion, timeSlot)}
                               sx={{
-                                ml: 2,
                                 borderRadius: 2,
                                 textTransform: 'none',
                                 fontWeight: 600,
-                                px: 3
+                                fontSize: isCompactMode ? '0.7rem' : undefined,
+                                px: isCompactMode ? 1 : 3
                               }}
                             >
-                              Use This Time
+                              {isCompactMode ? 'Use' : 'Use This Time'}
                             </Button>
                           </Box>
                         </Card>
                       ))}
                     </Box>
 
-                    <Accordion sx={{ mt: 2 }}>
-                      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                        <Typography variant="body2">
-                          Why these suggestions? (AI Reasoning)
-                        </Typography>
-                      </AccordionSummary>
-                      <AccordionDetails>
-                        <Typography variant="body2" color="text.secondary">
-                          {suggestion.reasoning}
-                        </Typography>
-                      </AccordionDetails>
-                    </Accordion>
+                    {!isCompactMode && (
+                      <Accordion sx={{ mt: 2 }}>
+                        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                          <Typography variant="body2">
+                            Why these suggestions? (AI Reasoning)
+                          </Typography>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Typography variant="body2" color="text.secondary">
+                            {suggestion.reasoning}
+                          </Typography>
+                        </AccordionDetails>
+                      </Accordion>
+                    )}
                   </CardContent>
                 </Card>
               ))}
@@ -440,48 +458,50 @@ What would you like to schedule?`,
       }}
     >
       {/* Header */}
-      <Paper
-        elevation={2}
-        sx={{
-          p: 2,
-          display: 'flex',
-          alignItems: 'center',
-          borderRadius: 0,
-          bgcolor: 'primary.main',
-          color: 'primary.contrastText'
-        }}
-      >
-        <SmartIcon sx={{ mr: 2 }} />
-        <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-          AI Scheduling Assistant
-        </Typography>
-        {onClose && (
-          <IconButton
-            color="inherit"
-            onClick={onClose}
-            size="small"
-          >
-            <CloseIcon />
-          </IconButton>
-        )}
-      </Paper>
+      {!isCompactMode && (
+        <Paper
+          elevation={2}
+          sx={{
+            p: 2,
+            display: 'flex',
+            alignItems: 'center',
+            borderRadius: 0,
+            bgcolor: 'primary.main',
+            color: 'primary.contrastText'
+          }}
+        >
+          <SmartIcon sx={{ mr: 2 }} />
+          <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+            AI Scheduling Assistant
+          </Typography>
+          {onClose && (
+            <IconButton
+              color="inherit"
+              onClick={onClose}
+              size="small"
+            >
+              <CloseIcon />
+            </IconButton>
+          )}
+        </Paper>
+      )}
 
       {/* Messages */}
       <Box
         sx={{
           flex: 1,
           overflow: 'auto',
-          p: 2,
+          p: isCompactMode ? 1 : 2,
           bgcolor: 'grey.50'
         }}
       >
         {messages.map(renderMessage)}
         
         {isLoading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'center', my: 1 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <CircularProgress size={20} />
-              <Typography variant="body2" color="text.secondary">
+              <CircularProgress size={isCompactMode ? 16 : 20} />
+              <Typography variant={isCompactMode ? 'caption' : 'body2'} color="text.secondary">
                 AI is thinking...
               </Typography>
             </Box>
@@ -493,9 +513,9 @@ What would you like to schedule?`,
 
       {/* Input */}
       <Paper
-        elevation={3}
+        elevation={isCompactMode ? 1 : 3}
         sx={{
-          p: 2,
+          p: isCompactMode ? 1 : 2,
           display: 'flex',
           alignItems: 'flex-end',
           gap: 1,
@@ -507,16 +527,17 @@ What would you like to schedule?`,
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="Describe the event you want to schedule..."
+          placeholder={isCompactMode ? "Schedule an event..." : "Describe the event you want to schedule..."}
           multiline
-          maxRows={4}
+          maxRows={isCompactMode ? 2 : 4}
           fullWidth
           variant="outlined"
           size="small"
           disabled={isLoading}
           sx={{
             '& .MuiOutlinedInput-root': {
-              borderRadius: 3
+              borderRadius: 2,
+              fontSize: isCompactMode ? '0.8rem' : undefined
             }
           }}
         />
@@ -525,6 +546,7 @@ What would you like to schedule?`,
           color="primary"
           onClick={handleSendMessage}
           disabled={!inputValue.trim() || isLoading}
+          size={isCompactMode ? 'small' : 'medium'}
           sx={{
             bgcolor: 'primary.main',
             color: 'primary.contrastText',
@@ -536,7 +558,7 @@ What would you like to schedule?`,
             }
           }}
         >
-          <SendIcon />
+          <SendIcon fontSize={isCompactMode ? 'small' : 'medium'} />
         </IconButton>
       </Paper>
     </Box>

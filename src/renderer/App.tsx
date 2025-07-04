@@ -34,6 +34,7 @@ interface Event {
   date: string; // YYYY-MM-DD format
   startTime?: string;
   endTime?: string;
+  location?: string;
   attendees?: string[];
   category: 'work' | 'personal' | 'meeting' | 'task' | 'reminder';
   color?: string;
@@ -103,6 +104,7 @@ const convertFormDataToEvent = (formData: EventFormData, id?: string): Event => 
     date: eventDate,
     startTime,
     endTime,
+    location: formData.location,
     attendees: formData.attendees,
     category: 'personal', // Default category, could be enhanced with smart classification
     isRecurring: formData.isRecurring,
@@ -183,82 +185,46 @@ const App: React.FC = () => {
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialCompleted, setTutorialCompleted] = useState(false);
 
+  // Check tutorial completion status on mount
+  useEffect(() => {
+    const checkTutorialStatus = () => {
+      const completed = localStorage.getItem('flowgenius-tutorial-completed');
+      if (completed === 'true') {
+        setTutorialCompleted(true);
+        console.log('🎓 Tutorial already completed');
+      }
+    };
+    
+    checkTutorialStatus();
+  }, []);
+
   // Load events based on authentication state
   useEffect(() => {
     const loadEvents = async () => {
-      if (isLoggedIn && user) {
-        // User is logged in - load their events from Supabase
-        console.log('🔍 Loading events for user:', user.id, user.email);
+      // Always load from localStorage now
+      console.log('📋 Loading events from localStorage');
+      const savedEvents = localStorage.getItem('flowgenius-events');
+      if (savedEvents) {
         try {
-          const userEvents = await eventService.getEvents(user.id);
-          console.log('📅 Loaded', userEvents.length, 'events from Supabase:', userEvents);
-          // Convert Supabase events to local Event format
-          const localEvents = userEvents.map(event => ({
-            id: event.id,
-            title: event.title,
-            description: event.description,
-            date: event.start_time.split('T')[0], // Extract date from start_time
-            startTime: event.start_time.split('T')[1]?.substring(0, 5), // Extract time from start_time
-            endTime: event.end_time.split('T')[1]?.substring(0, 5), // Extract time from end_time
-            attendees: event.attendees,
-            category: 'personal' as Event['category'], // Default category, could be enhanced
-            isRecurring: event.is_recurring,
-            recurrenceRule: event.recurrence_rule ? {
-              frequency: event.recurrence_rule.includes('DAILY') ? 'daily' as const : 
-                        event.recurrence_rule.includes('WEEKLY') ? 'weekly' as const : 'monthly' as const
-            } : undefined,
-            parentEventId: event.parent_event_id || undefined
-          }));
-          console.log('✅ Converted to local format:', localEvents);
-          setEvents(localEvents);
-          setFilteredEvents(localEvents);
+          const parsedEvents = JSON.parse(savedEvents);
+          console.log('✅ Loaded', parsedEvents.length, 'events from localStorage');
+          setEvents(parsedEvents);
+          setFilteredEvents(parsedEvents);
         } catch (error) {
-          console.error('❌ Failed to load user events:', error);
-          // Fallback to empty array
+          console.error('❌ Failed to parse saved events:', error);
           setEvents([]);
           setFilteredEvents([]);
         }
       } else {
-        // User not logged in - load from localStorage or show sample events
-        console.log('👤 No user logged in, loading from localStorage');
-        const savedEvents = localStorage.getItem('flowgenius-events');
-        if (savedEvents) {
-          const parsedEvents = JSON.parse(savedEvents);
-          console.log('📋 Loaded', parsedEvents.length, 'events from localStorage');
-          setEvents(parsedEvents);
-          setFilteredEvents(parsedEvents);
-        } else {
-          // Sample events for demo
-          console.log('🎯 Loading sample events');
-          const sampleEvents: Event[] = [
-            { 
-              id: '1', 
-              title: 'Team Meeting', 
-              date: '2024-06-15', 
-              startTime: '10:00', 
-              endTime: '11:00',
-              category: 'meeting',
-              description: 'Weekly team sync meeting'
-            },
-            { 
-              id: '2', 
-              title: 'Project Review', 
-              date: '2024-06-22', 
-              startTime: '14:00', 
-              endTime: '15:30',
-              category: 'work',
-              attendees: ['john@example.com', 'jane@example.com']
-            },
-          ];
-          setEvents(sampleEvents);
-          setFilteredEvents(sampleEvents);
-          localStorage.setItem('flowgenius-events', JSON.stringify(sampleEvents));
-        }
+        // No saved events - start with empty
+        console.log('🎯 No saved events, starting fresh');
+        setEvents([]);
+        setFilteredEvents([]);
       }
     };
 
     loadEvents();
-  }, [isLoggedIn, user]); // Reload events when authentication state changes
+  }, []); // Only run once on mount
 
   // Load Google Maps once when the app initializes
   useEffect(() => {
@@ -317,6 +283,78 @@ const App: React.FC = () => {
       window.electronAPI.onOpenSettings(() => {
         setShowNotificationSettings(true);
       });
+      
+      // Listen for distraction notifications
+      window.electronAPI.onDistractionNotification((data) => {
+        console.log('🚨 Distraction notification received:', data);
+        
+        // Show browser notification
+        if (Notification.permission === 'granted') {
+          new Notification(data.title, {
+            body: data.message,
+            icon: './assets/notification-icon.png',
+            tag: 'distraction-alert'
+          });
+        }
+        
+        // Also show in-app notification if available
+        if (window.electronAPI?.showNotification) {
+          window.electronAPI.showNotification({
+            title: data.title,
+            body: data.message
+          });
+        }
+      });
+    }
+
+    // Listen for messages from tray popup
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === 'OPEN_AI_ASSISTANT') {
+        console.log('🤖 Opening AI assistant from tray popup');
+        dispatch(toggleVisibility());
+      } else if (event.data.type === 'EVENTS_UPDATED') {
+        console.log('📅 Events updated from tray popup, reloading...');
+        // Reload events from localStorage
+        const savedEvents = localStorage.getItem('flowgenius-events');
+        if (savedEvents) {
+          const parsedEvents = JSON.parse(savedEvents);
+          setEvents(parsedEvents);
+          setFilteredEvents(parsedEvents);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    
+    // Also listen for direct postMessage from iframe/popup
+    const handleParentMessage = (event: MessageEvent) => {
+      if (event.data.type === 'OPEN_AI_ASSISTANT') {
+        console.log('🤖 Opening AI assistant from tray popup (parent)');
+        dispatch(toggleVisibility());
+      }
+    };
+
+    if (window.parent && window.parent !== window) {
+      window.parent.addEventListener('message', handleParentMessage);
+    }
+
+    // Listen for events-updated from main process (when events are created from tray)
+    if (window.electronAPI?.onEventsUpdated) {
+      window.electronAPI.onEventsUpdated((updatedEvents: any[]) => {
+        console.log('📅 Events updated notification from main process, reloading from localStorage...');
+        // Reload events from localStorage instead of using the passed events
+        const savedEvents = localStorage.getItem('flowgenius-events');
+        if (savedEvents) {
+          try {
+            const parsedEvents = JSON.parse(savedEvents);
+            console.log('✅ Reloaded', parsedEvents.length, 'events from localStorage');
+            setEvents(parsedEvents);
+            setFilteredEvents(parsedEvents);
+          } catch (error) {
+            console.error('❌ Failed to parse saved events:', error);
+          }
+        }
+      });
     }
 
     // Cleanup subscription on unmount
@@ -329,22 +367,24 @@ const App: React.FC = () => {
         window.electronAPI.removeAllListeners('show-today-events');
         window.electronAPI.removeAllListeners('focus-event');
         window.electronAPI.removeAllListeners('open-settings');
+        window.electronAPI.removeAllListeners('distraction-notification');
+      }
+      
+      // Remove message listeners
+      window.removeEventListener('message', handleMessage);
+      if (window.parent && window.parent !== window) {
+        window.parent.removeEventListener('message', handleParentMessage);
       }
     };
   }, []);
 
-  // Save events based on authentication state
+  // Save events whenever they change
   useEffect(() => {
-    if (isLoggedIn && user) {
-      // Don't save to localStorage when user is logged in - events are in Supabase
-      // Just update system tray
-      updateSystemTray();
-    } else {
-      // Save to localStorage for non-authenticated users
+    if (events.length >= 0) { // Allow saving even empty array
       localStorage.setItem('flowgenius-events', JSON.stringify(events));
       updateSystemTray();
     }
-  }, [events, isLoggedIn, user]);
+  }, [events]);
 
   const updateSystemTray = () => {
     // Update system tray with upcoming events
@@ -392,13 +432,6 @@ const App: React.FC = () => {
     // Load notification settings
     const settings = notificationService.getSettings();
     console.log('📋 Loaded notification settings:', settings);
-
-    // Check Google Calendar connection
-    const isConnected = gmailService.isAuthenticated;
-    setGmailConnected(isConnected);
-    if (isConnected) {
-      console.log('📅 Google Calendar already connected');
-    }
 
     // Initialize tracking service
     const trackingSettings = trackingService.getSettings();
@@ -604,124 +637,84 @@ const App: React.FC = () => {
   // New handler for the Enhanced Event Modal
   const handleEventSave = async (eventData: EventFormData) => {
     try {
-      if (isLoggedIn && user) {
-        // User is logged in - save to Supabase
-        if (editingEvent) {
-          // Update existing event in Supabase
-          const supabaseUpdate = {
-            title: eventData.title,
-            description: eventData.description,
-            start_time: eventData.startTime.toISOString(),
-            end_time: eventData.endTime.toISOString(),
-            location: eventData.location,
-            attendees: eventData.attendees,
-            is_recurring: eventData.isRecurring,
-            recurrence_rule: eventData.recurrenceRule
-          };
-          
-          await eventService.updateEvent(editingEvent.id, supabaseUpdate);
-          
-          // Update local state
-          const updatedLocalEvent = convertFormDataToEvent(eventData, editingEvent.id);
-          const eventsWithoutThis = events.filter(event => 
-            event.id !== editingEvent.id && event.parentEventId !== editingEvent.id
-          );
-          const updatedEvents = generateRecurringEvents(updatedLocalEvent);
-          
-          // Cancel existing reminders and schedule new ones
-          notificationService.cancelEventReminders(editingEvent.id);
-          updatedEvents.forEach(event => {
-            notificationService.scheduleEventReminder(event);
-          });
-          
-          setEvents([...eventsWithoutThis, ...updatedEvents]);
-        } else {
-          // Create new event in Supabase
-          const supabaseEvent = {
-            user_id: user.id,
-            title: eventData.title,
-            description: eventData.description,
-            start_time: eventData.startTime.toISOString(),
-            end_time: eventData.endTime.toISOString(),
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            location: eventData.location,
-            attendees: eventData.attendees,
-            is_recurring: eventData.isRecurring,
-            recurrence_rule: eventData.recurrenceRule
-          };
-          
-          console.log('💾 Creating event in Supabase for user:', user.id, supabaseEvent);
-          const createdEvent = await eventService.createEvent(supabaseEvent);
-          console.log('✅ Event created successfully:', createdEvent);
-          
-          // Convert to local format and add to state
-          const localEvent = {
-            id: createdEvent.id,
-            title: createdEvent.title,
-            description: createdEvent.description,
-            date: createdEvent.start_time.split('T')[0],
-            startTime: createdEvent.start_time.split('T')[1]?.substring(0, 5),
-            endTime: createdEvent.end_time.split('T')[1]?.substring(0, 5),
-            attendees: createdEvent.attendees,
-            category: 'personal' as Event['category'],
-            isRecurring: createdEvent.is_recurring,
-                         recurrenceRule: createdEvent.recurrence_rule ? {
-               frequency: createdEvent.recurrence_rule.includes('DAILY') ? 'daily' as const : 
-                         createdEvent.recurrence_rule.includes('WEEKLY') ? 'weekly' as const : 'monthly' as const
-             } : undefined,
-            parentEventId: createdEvent.parent_event_id || undefined
-          };
-          
-          const newEvents = generateRecurringEvents(localEvent);
-          
-          // Schedule notifications for new events
-          newEvents.forEach(event => {
-            notificationService.scheduleEventReminder(event);
-          });
-          
-          setEvents([...events, ...newEvents]);
-        }
-      } else {
-        // User not logged in - use original logic with localStorage
-        let newEvent: Event;
-        
-        if (editingEvent) {
-          // Update existing event
-          newEvent = convertFormDataToEvent(eventData, editingEvent.id);
-          
-          // Cancel existing reminders
-          notificationService.cancelEventReminders(editingEvent.id);
-          
-          // Remove existing event instances
-          const eventsWithoutThis = events.filter(event => 
-            event.id !== editingEvent.id && event.parentEventId !== editingEvent.id
-          );
-          
-          // Generate new event(s) based on updated settings
-          const updatedEvents = generateRecurringEvents(newEvent);
-          
-          // Schedule notifications for updated events
-          updatedEvents.forEach(event => {
-            notificationService.scheduleEventReminder(event);
-          });
-          
-          setEvents([...eventsWithoutThis, ...updatedEvents]);
-        } else {
-          // Create new event
-          newEvent = convertFormDataToEvent(eventData);
-          const newEvents = generateRecurringEvents(newEvent);
-          
-          // Schedule notifications for new events
-          newEvents.forEach(event => {
-            notificationService.scheduleEventReminder(event);
-          });
-          
-          setEvents([...events, ...newEvents]);
-        }
+      // Cancel existing reminders if editing
+      if (editingEvent) {
+        notificationService.cancelEventReminders(editingEvent.id);
       }
       
+      // Convert to Event format
+      let newEvent: Event;
+      
+      if (editingEvent) {
+        // Update existing event
+        newEvent = convertFormDataToEvent(eventData, editingEvent.id);
+        
+        // Make sure location is included
+        if (eventData.location) {
+          newEvent.location = eventData.location;
+        }
+        
+        // Remove existing event instances
+        const eventsWithoutThis = events.filter(event => 
+          event.id !== editingEvent.id && event.parentEventId !== editingEvent.id
+        );
+        
+        // Generate new event(s) based on updated settings
+        const updatedEvents = generateRecurringEvents(newEvent);
+        
+        // Update state
+        const allEvents = [...eventsWithoutThis, ...updatedEvents];
+        setEvents(allEvents);
+        setFilteredEvents(allEvents);
+        
+        // Save to localStorage
+        localStorage.setItem('flowgenius-events', JSON.stringify(allEvents));
+        
+        // Schedule notifications for updated events
+        updatedEvents.forEach(event => {
+          notificationService.scheduleEventReminder(event);
+        });
+      } else {
+        // Create new event
+        newEvent = convertFormDataToEvent(eventData);
+        
+        // Make sure location is included
+        if (eventData.location) {
+          newEvent.location = eventData.location;
+        }
+        
+        const newEvents = generateRecurringEvents(newEvent);
+        
+        // Update state
+        const allEvents = [...events, ...newEvents];
+        setEvents(allEvents);
+        setFilteredEvents(allEvents);
+        
+        // Save to localStorage
+        localStorage.setItem('flowgenius-events', JSON.stringify(allEvents));
+        
+        // Schedule notifications for new events
+        newEvents.forEach(event => {
+          notificationService.scheduleEventReminder(event);
+        });
+      }
+      
+      // Update system tray
+      updateSystemTray();
+      
+      // IMPORTANT: Close the modal and reset editing state
       setShowEventModal(false);
       setEditingEvent(null);
+      
+      // Show success notification
+      notificationService.showNotification(
+        '✅ Success',
+        `Event "${eventData.title}" ${editingEvent ? 'updated' : 'created'} successfully!`,
+        { type: 'system' }
+      );
+      
+      console.log('✅ Event saved successfully:', newEvent);
+      
     } catch (error) {
       console.error('Failed to save event:', error);
       notificationService.showNotification(
@@ -772,6 +765,7 @@ const App: React.FC = () => {
       
       // Update the events array
       setEvents([...eventsWithoutThisEvent, ...newEvents]);
+      setFilteredEvents([...eventsWithoutThisEvent, ...newEvents]);
       
       console.log('✅ Event updated with', newEvents.length, 'total instances');
     } else {
@@ -784,6 +778,7 @@ const App: React.FC = () => {
       });
       
       setEvents([...events, ...newEvents]);
+      setFilteredEvents([...events, ...newEvents]);
     }
 
     resetEventForm();
@@ -807,6 +802,7 @@ const App: React.FC = () => {
           event.id !== eventId && event.parentEventId !== eventId
         );
         setEvents(updatedEvents);
+        setFilteredEvents(updatedEvents);
         setShowEventModal(false);
         setEditingEvent(null);
       } catch (error) {
@@ -825,6 +821,7 @@ const App: React.FC = () => {
     if (confirm(`Delete ${selectedEvents.length} selected events?`)) {
       const updatedEvents = events.filter(event => !selectedEvents.includes(event.id));
       setEvents(updatedEvents);
+      setFilteredEvents(updatedEvents);
       setSelectedEvents([]);
     }
   };
@@ -847,200 +844,23 @@ const App: React.FC = () => {
     return filteredEvents.filter(event => event.date >= start && event.date <= end);
   };
 
-  // Test IPC communication
+  // Test IPC Communication
   const testIPCCommunication = async () => {
-    try {
-      console.log('🧪 Testing IPC communication...');
-      
-      if (window.electronAPI && window.electronAPI.testIPC) {
-        const result = await window.electronAPI.testIPC();
-        console.log('✅ IPC Test Result:', result);
-      } else {
-        console.error('❌ testIPC method not available');
-      }
-    } catch (error) {
-      console.error('❌ IPC Test Failed:', error);
-    }
-  };
-
-  // Gmail & Google Calendar Integration Functions
-  const handleGmailConnect = async () => {
-    try {
-      console.log('🔗 Initiating Google Calendar connection...');
-      console.log('🔧 DEBUG: ElectronAPI available?', !!window.electronAPI);
-      console.log('🔧 DEBUG: startGoogleOAuth method available?', !!window.electronAPI?.startGoogleOAuth);
-      
-      // Test IPC communication first
-      await testIPCCommunication();
-      
-      const success = await gmailService.authenticate();
-      
-      console.log('🔧 DEBUG: Authentication result:', success);
-      
-      if (success) {
-        setGmailConnected(true);
-        notificationService.showNotification(
-          '📅 Google Calendar Connected',
-          'Successfully connected to Google Calendar! You can now sync events.',
-          { type: 'system' }
-        );
-        
-        // Automatically sync after connection
-        await handleSyncWithGoogleCalendar();
-      } else {
-        console.log('❌ Authentication failed - no success response');
-        notificationService.showNotification(
-          '❌ Connection Failed',
-          'Google Calendar authentication failed. Please try again.',
-          { type: 'system' }
-        );
-      }
-    } catch (error) {
-      console.error('Google Calendar connection failed:', error);
-      console.error('🔧 DEBUG: Error details:', error instanceof Error ? error.message : String(error));
-      console.error('🔧 DEBUG: Error stack:', error instanceof Error ? error.stack : 'No stack trace');
-      notificationService.showNotification(
-        '❌ Connection Failed',
-        'Failed to connect to Google Calendar. Please try again.',
-        { type: 'system' }
-      );
-    }
-  };
-
-  const handleGmailDisconnect = async () => {
-    console.log('🔌 Disconnecting from Google Calendar...');
-    await gmailService.signOut();
-    setGmailConnected(false);
-    setGmailEmails([]);
+    console.log('🔧 Testing IPC communication...');
     
-    notificationService.showNotification(
-      '📅 Google Calendar Disconnected',
-      'Google Calendar has been disconnected from FlowGenius.',
-      { type: 'system' }
-    );
-  };
-
-  // New: Two-way sync with Google Calendar
-  const handleSyncWithGoogleCalendar = async () => {
-    if (!gmailConnected) {
-      notificationService.showNotification(
-        '❌ Not Connected',
-        'Please connect to Google Calendar first.',
-        { type: 'system' }
-      );
-      return;
-    }
-
-    setLoadingEmails(true);
     try {
-      console.log('🔄 Starting Google Calendar sync...');
+      // Test with getAppInfo
+      const appInfo = await window.electronAPI.getAppInfo();
+      console.log('✅ App info retrieved:', appInfo);
       
-      // Get current local events (excluding Google Calendar events to avoid duplicates)
-      const currentEvents = events.filter(event => event.source !== 'google_calendar');
-      
-      // Perform two-way sync
-      const syncResult = await gmailService.syncWithGoogleCalendar(currentEvents);
-      
-      // Merge downloaded events with existing local events
-      const mergedEvents = [
-        ...currentEvents, // Keep local events
-        ...syncResult.downloaded // Add downloaded Google Calendar events
-      ];
-      
-      // Remove duplicates based on title and date
-      const uniqueEvents = mergedEvents.filter((event, index, self) => 
-        index === self.findIndex(e => 
-          e.title === event.title && 
-          e.date === event.date && 
-          e.startTime === event.startTime
-        )
-      );
-      
-      setEvents(uniqueEvents);
-      setFilteredEvents(uniqueEvents);
-      
-      // Schedule notifications for new events
-      syncResult.downloaded.forEach(event => {
-        notificationService.scheduleEventReminder(event);
-      });
-      
-      notificationService.showNotification(
-        '✅ Sync Complete',
-        `Downloaded ${syncResult.downloaded.length} events, uploaded ${syncResult.uploaded} events.`,
-        { type: 'system' }
-      );
-      
-      console.log('✅ Google Calendar sync completed successfully');
+      return true;
     } catch (error) {
-      console.error('❌ Google Calendar sync failed:', error);
-      notificationService.showNotification(
-        '❌ Sync Failed',
-        'Failed to sync with Google Calendar. Please try again.',
-        { type: 'system' }
-      );
+      console.error('❌ IPC test failed:', error);
+      throw error;
     }
-    setLoadingEmails(false);
   };
 
-  // Legacy: Import from Gmail emails (keeping for backward compatibility)
-  const handleImportFromGmail = async () => {
-    if (!gmailConnected) {
-      notificationService.showNotification(
-        '❌ Not Connected',
-        'Please connect to Google Calendar first.',
-        { type: 'system' }
-      );
-      return;
-    }
 
-    setLoadingEmails(true);
-    try {
-      console.log('📧 Importing events from Gmail emails...');
-      const emails = await gmailService.getRecentEmails(10);
-      setGmailEmails(emails);
-      
-      // Extract events from emails
-      let totalEventsImported = 0;
-      const newEvents: Event[] = [];
-
-      for (const email of emails) {
-        const extractedEvents = gmailService.extractEventsFromEmail(email);
-        for (const emailEvent of extractedEvents) {
-          const calendarEvent = gmailService.convertToCalendarEvent(emailEvent);
-          newEvents.push(calendarEvent);
-          totalEventsImported++;
-        }
-      }
-
-      if (newEvents.length > 0) {
-        // Schedule notifications for imported events
-        newEvents.forEach(event => {
-          notificationService.scheduleEventReminder(event);
-        });
-
-        setEvents(prev => [...prev, ...newEvents]);
-        notificationService.showNotification(
-          '📧 Email Events Imported',
-          `Successfully imported ${totalEventsImported} events from Gmail emails!`,
-          { type: 'system' }
-        );
-      } else {
-        notificationService.showNotification(
-          '📧 No Events Found',
-          'No calendar events were found in recent emails.',
-          { type: 'system' }
-        );
-      }
-    } catch (error) {
-      console.error('Failed to import from Gmail emails:', error);
-      notificationService.showNotification(
-        '❌ Import Failed',
-        'Failed to import events from Gmail emails.',
-        { type: 'system' }
-      );
-    }
-    setLoadingEmails(false);
-  };
 
   // Notification Settings Functions
   const handleNotificationSettingsUpdate = (newSettings: any) => {
@@ -1085,70 +905,48 @@ const App: React.FC = () => {
 
   const handleAIEventCreate = async (eventData: EventFormData) => {
     try {
-      if (isLoggedIn && user) {
-        // User is logged in - save to Supabase (same logic as handleEventSave)
-        const supabaseEvent = {
-          user_id: user.id,
-          title: eventData.title,
-          description: eventData.description,
-          start_time: eventData.startTime.toISOString(),
-          end_time: eventData.endTime.toISOString(),
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          location: eventData.location,
-          attendees: eventData.attendees,
-          is_recurring: eventData.isRecurring,
-          recurrence_rule: eventData.recurrenceRule
-        };
-        
-        console.log('💾 Creating AI event in Supabase for user:', user.id, supabaseEvent);
-        const createdEvent = await eventService.createEvent(supabaseEvent);
-        console.log('✅ AI Event created successfully:', createdEvent);
-        
-        // Convert to local format and add to state
-        const localEvent = {
-          id: createdEvent.id,
-          title: createdEvent.title,
-          description: createdEvent.description,
-          date: createdEvent.start_time.split('T')[0],
-          startTime: createdEvent.start_time.split('T')[1]?.substring(0, 5),
-          endTime: createdEvent.end_time.split('T')[1]?.substring(0, 5),
-          attendees: createdEvent.attendees,
-          category: 'personal' as Event['category'],
-          isRecurring: createdEvent.is_recurring,
-          recurrenceRule: createdEvent.recurrence_rule ? {
-            frequency: createdEvent.recurrence_rule.includes('DAILY') ? 'daily' as const : 
-                      createdEvent.recurrence_rule.includes('WEEKLY') ? 'weekly' as const : 'monthly' as const
-          } : undefined,
-          parentEventId: createdEvent.parent_event_id || undefined
-        };
-        
-        const newEvents = generateRecurringEvents(localEvent);
-        setEvents([...events, ...newEvents]);
-        setFilteredEvents([...events, ...newEvents]);
-        
-        // Schedule notifications for new events
-        newEvents.forEach(event => {
-          notificationService.scheduleEventReminder(event);
-        });
-      } else {
-        // User not logged in - save to localStorage (original logic)
-        const newEvent = convertFormDataToEvent(eventData);
-        const updatedEvents = [...events, newEvent];
-        setEvents(updatedEvents);
-        setFilteredEvents(updatedEvents);
-        localStorage.setItem('flowgenius-events', JSON.stringify(updatedEvents));
-        
-        // Schedule notification for new event
-        notificationService.scheduleEventReminder(newEvent);
+      // Always save locally - no Google Calendar
+      const newEvent = convertFormDataToEvent(eventData);
+      
+      // Make sure location is included
+      if (eventData.location) {
+        newEvent.location = eventData.location;
       }
+      
+      const newEvents = generateRecurringEvents(newEvent);
+      
+      // Update state
+      const updatedEvents = [...events, ...newEvents];
+      setEvents(updatedEvents);
+      setFilteredEvents(updatedEvents);
+      
+      // Save to localStorage
+      localStorage.setItem('flowgenius-events', JSON.stringify(updatedEvents));
+      
+      // Schedule notifications for new events
+      newEvents.forEach(event => {
+        notificationService.scheduleEventReminder(event);
+      });
+      
+      // Update system tray
+      updateSystemTray();
 
       // Record successful scheduling for AI learning
       dispatch(recordSuccessfulScheduling({
-        eventType: 'personal', // Default event type since EventFormData doesn't have category
+        eventType: 'personal',
         suggestedLocation: eventData.location || '',
         suggestedAttendees: eventData.attendees || [],
-        timeSlotUsed: 0 // Could be enhanced to track which time slot was actually used
+        timeSlotUsed: 0
       }));
+      
+      // Show success notification
+      notificationService.showNotification(
+        '✅ Success',
+        `Event "${eventData.title}" created successfully!`,
+        { type: 'system' }
+      );
+      
+      console.log('✅ AI Event created successfully:', newEvent);
     } catch (error) {
       console.error('Failed to create AI event:', error);
       notificationService.showNotification(
@@ -1169,7 +967,7 @@ const App: React.FC = () => {
       start_time: `${event.date} ${event.startTime || '09:00'}`,
       end_time: `${event.date} ${event.endTime || '10:00'}`,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      location: '',
+      location: event.location || '',
       attendees: event.attendees || [],
       is_recurring: event.isRecurring || false,
       recurrence_rule: event.recurrenceRule ? `FREQ=${event.recurrenceRule.frequency.toUpperCase()}` : '',
@@ -1913,14 +1711,6 @@ const App: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
                 <span>Welcome, {userProfile?.full_name || user?.email || 'User'}</span>
                 <button 
-                  style={{...styles.headerButton, ...(gmailConnected ? styles.connectedButton : {})}}
-                  onClick={() => setShowGmailIntegration(true)}
-                  title={gmailConnected ? 'Gmail Connected - Click to manage' : 'Connect Gmail'}
-                  data-tutorial="gmail-integration"
-                >
-                  📧 Gmail {gmailConnected && '✓'}
-                </button>
-                <button 
                   style={styles.headerButton}
                   onClick={() => setShowNotificationSettings(true)}
                   title="Notification Settings"
@@ -2174,105 +1964,7 @@ const App: React.FC = () => {
               </div>
             )}
 
-            {/* Google Calendar Integration Modal */}
-            {showGmailIntegration && (
-              <div style={styles.modalOverlay} onClick={() => setShowGmailIntegration(false)}>
-                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                  <div style={styles.modalHeader}>
-                    <span>📅 Google Calendar Integration</span>
-                  </div>
-                  
-                  <div style={styles.modalForm}>
-                    <div style={styles.settingsSection}>
-                      <h4>Connection Status</h4>
-                      <p style={{ color: gmailConnected ? '#4caf50' : '#f44336', fontWeight: 'bold' }}>
-                        {gmailConnected ? '✅ Connected to Google Calendar' : '❌ Not Connected'}
-                      </p>
-                      
-                      {!gmailConnected ? (
-                        <div>
-                          <p>Connect Google Calendar to sync events between FlowGenius and your Google Calendar.</p>
-                          <button 
-                            style={{...styles.modalButton, ...styles.primaryButton}}
-                            onClick={handleGmailConnect}
-                          >
-                            Connect Google Calendar
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          <button 
-                            style={{...styles.modalButton, ...styles.primaryButton}}
-                            onClick={handleSyncWithGoogleCalendar}
-                            disabled={loadingEmails}
-                          >
-                            {loadingEmails ? 'Syncing...' : '🔄 Sync with Google Calendar'}
-                          </button>
-                          <button 
-                            style={{...styles.modalButton, ...styles.secondaryButton}}
-                            onClick={handleImportFromGmail}
-                            disabled={loadingEmails}
-                          >
-                            {loadingEmails ? 'Importing...' : '📧 Import from Gmail Emails'}
-                          </button>
-                          <button 
-                            style={{...styles.modalButton, ...styles.dangerButton}}
-                            onClick={handleGmailDisconnect}
-                          >
-                            Disconnect
-                          </button>
-                        </div>
-                      )}
-                    </div>
 
-                    {gmailConnected && (
-                      <div style={styles.settingsSection}>
-                        <h4>How it Works</h4>
-                        <div style={{ color: '#666', fontSize: '14px' }}>
-                          <p><strong>Two-Way Sync:</strong></p>
-                          <ul style={{ marginLeft: '20px' }}>
-                            <li>Downloads events from your Google Calendar</li>
-                            <li>Uploads FlowGenius events to Google Calendar</li>
-                            <li>Keeps both calendars in sync</li>
-                          </ul>
-                          <p><strong>Email Import:</strong></p>
-                          <ul style={{ marginLeft: '20px' }}>
-                            <li>Scans recent Gmail emails</li>
-                            <li>Extracts meeting times and appointments</li>
-                            <li>Creates calendar events automatically</li>
-                          </ul>
-                        </div>
-                      </div>
-                    )}
-
-                    {gmailEmails.length > 0 && (
-                      <div style={styles.settingsSection}>
-                        <h4>Recent Emails ({gmailEmails.length})</h4>
-                        <div style={{ maxHeight: '200px', overflow: 'auto' }}>
-                          {gmailEmails.map((email, index) => (
-                            <div key={email.id || index} style={styles.emailItem}>
-                              <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{email.subject}</div>
-                              <div style={{ fontSize: '12px', color: '#666' }}>From: {email.from}</div>
-                              <div style={{ fontSize: '12px', color: '#999' }}>{email.snippet}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    
-                    <div style={styles.modalButtons}>
-                      <button 
-                        type="button"
-                        style={{...styles.modalButton, ...styles.secondaryButton}}
-                        onClick={() => setShowGmailIntegration(false)}
-                      >
-                        Close
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* System Settings Modal */}
             {showSystemSettings && (
@@ -2382,6 +2074,8 @@ const App: React.FC = () => {
                 events={getAICompatibleEvents()}
                 onEventCreate={handleAIEventCreate}
                 onClose={() => dispatch(toggleVisibility())}
+                selectedDate={selectedDate ? new Date(selectedDate) : undefined}
+                isCompactMode={false}
               />
             </Drawer>
 

@@ -189,8 +189,8 @@ const createTrayPopup = (): void => {
   }
 
   trayPopup = new BrowserWindow({
-    width: 350,
-    height: 450,
+    width: 450,
+    height: 500,
     show: false,
     frame: false,
     resizable: false,
@@ -221,12 +221,12 @@ const createTrayPopup = (): void => {
     const workArea = screen.getPrimaryDisplay().workArea;
     
     // Calculate position (above tray icon)
-    const x = Math.round(trayBounds.x + (trayBounds.width / 2) - (350 / 2));
-    const y = Math.round(trayBounds.y - 450 - 10); // 10px gap above tray
+    const x = Math.round(trayBounds.x + (trayBounds.width / 2) - (450 / 2));
+    const y = Math.round(trayBounds.y - 500 - 10); // 10px gap above tray
     
     // Ensure popup stays within screen bounds
-    const finalX = Math.max(0, Math.min(x, workArea.width - 350));
-    const finalY = Math.max(0, Math.min(y, workArea.height - 450));
+    const finalX = Math.max(0, Math.min(x, workArea.width - 450));
+    const finalY = Math.max(0, Math.min(y, workArea.height - 500));
     
     trayPopup.setPosition(finalX, finalY);
   }
@@ -1207,13 +1207,79 @@ ipcMain.handle('get-today-events', () => {
   return todayEvents;
 });
 
-ipcMain.handle('create-event', (event, eventData) => {
+ipcMain.handle('create-event', async (event, eventData) => {
   console.log('📅 Create event requested:', eventData);
-  // This would typically integrate with the calendar service
-  // For now, just return a success response
-  return { success: true, event: eventData };
+  
+  try {
+    // Handle both EventFormData format and legacy format
+    const startTime = eventData.startTime || eventData.start;
+    const endTime = eventData.endTime || eventData.end;
+    
+    if (!startTime || !endTime) {
+      throw new Error('Event must have start and end times');
+    }
+    
+    // Convert to Date objects if they're strings
+    const startDate = startTime instanceof Date ? startTime : new Date(startTime);
+    const endDate = endTime instanceof Date ? endTime : new Date(endTime);
+    
+    // Create local event format
+    const localEvent = {
+      id: `local-${Date.now()}`,
+      title: eventData.title,
+      description: eventData.description || '',
+      date: startDate.toISOString().split('T')[0],
+      startTime: startDate.toTimeString().substring(0, 5),
+      endTime: endDate.toTimeString().substring(0, 5),
+      location: eventData.location || '',
+      attendees: eventData.attendees || [],
+      category: 'personal' as const,
+      isRecurring: eventData.isRecurring || false,
+      recurrenceRule: eventData.recurrenceRule || undefined,
+      source: 'local' as const
+    };
+    
+    // Add to upcomingEvents for tray display
+    upcomingEvents.push({
+      ...localEvent,
+      start: startDate,
+      end: endDate,
+      startTime: startDate.toISOString(),
+      endTime: endDate.toISOString()
+    });
+    
+    console.log('✅ Event created successfully:', localEvent);
+    
+    // Notify main window to reload events from localStorage
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('events-updated', upcomingEvents);
+    }
+    
+    return { success: true, event: localEvent };
+    
+  } catch (error) {
+    console.error('❌ Failed to create event:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return { success: false, error: errorMessage };
+  }
 });
 
+// Distraction notification IPC handlers
+ipcMain.handle('set-distraction-notifications', (event, enabled: boolean, thresholdMinutes: number) => {
+  console.log('🚨 Set distraction notifications:', enabled, thresholdMinutes);
+  windowsAppTracker.setDistractionNotifications(enabled, thresholdMinutes);
+});
+
+ipcMain.handle('get-distraction-settings', () => {
+  console.log('🚨 Get distraction settings requested');
+  return windowsAppTracker.getDistractionSettings();
+});
+
+ipcMain.handle('get-current-distraction-time', () => {
+  console.log('🚨 Get current distraction time requested');
+  return windowsAppTracker.getCurrentDistractionTime();
+});
+  
 console.log('🔧 IPC handlers registered');
 
  

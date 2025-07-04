@@ -78,24 +78,26 @@ export class AIAssistantService {
   /**
    * Process user message and generate AI response with event suggestions
    */
-  async processMessage(userMessage: string, existingEvents: Event[]): Promise<ChatMessage> {
-    const userChatMessage: ChatMessage = {
+  async processMessage(userMessage: string, existingEvents: Event[], selectedDate?: Date): Promise<ChatMessage> {
+    const userMsg: ChatMessage = {
       id: this.generateId(),
       type: 'user',
       content: userMessage,
       timestamp: new Date()
     };
-
-    this.conversationHistory.push(userChatMessage);
+    
+    this.conversationHistory.push(userMsg);
 
     try {
+      // Try LLM if available
       if (this.llm) {
-        return await this.processWithLLM(userMessage, existingEvents);
+        return await this.processWithLLM(userMessage, existingEvents, selectedDate);
       } else {
-        return await this.processWithFallback(userMessage, existingEvents);
+        // Fallback to rule-based processing
+        return await this.processWithFallback(userMessage, existingEvents, selectedDate);
       }
     } catch (error) {
-      console.error('Error processing AI message:', error);
+      console.error('Failed to process message:', error);
       return this.createErrorResponse();
     }
   }
@@ -103,70 +105,79 @@ export class AIAssistantService {
   /**
    * Process message using LLM for natural language understanding
    */
-  private async processWithLLM(userMessage: string, existingEvents: Event[]): Promise<ChatMessage> {
-    const systemPrompt = this.createSystemPrompt(existingEvents);
-    const contextPrompt = this.createContextPrompt(userMessage);
+  private async processWithLLM(userMessage: string, existingEvents: Event[], selectedDate?: Date): Promise<ChatMessage> {
+    try {
+      const systemPrompt = this.createSystemPrompt(existingEvents);
+      const contextPrompt = this.createContextPrompt(userMessage);
+      
+      const response = await this.llm!.invoke([
+        ['system', systemPrompt],
+        ['human', contextPrompt]
+      ]);
 
-    const messages = [
-      new SystemMessage(systemPrompt),
-      new HumanMessage(contextPrompt)
-    ];
+      const aiResponseText = response.content as string;
+      
+      // Parse the response to extract event suggestion
+      const suggestion = await this.parseEventSuggestion(aiResponseText, userMessage, existingEvents, selectedDate);
+      
+      const aiMessage: ChatMessage = {
+        id: this.generateId(),
+        type: 'assistant',
+        content: aiResponseText || 'I can help you schedule that event. Let me find the best time slot for you.',
+        timestamp: new Date(),
+        suggestions: suggestion ? [suggestion] : undefined,
+        eventData: suggestion ? this.convertSuggestionToFormData(suggestion) : undefined
+      };
 
-    const response = await this.llm!.invoke(messages);
-    const aiResponse = response.content as string;
-
-    // Parse the LLM response to extract structured event data
-    const eventSuggestion = await this.parseEventSuggestion(aiResponse, userMessage, existingEvents);
-    
-    const assistantMessage: ChatMessage = {
-      id: this.generateId(),
-      type: 'assistant',
-      content: aiResponse,
-      timestamp: new Date(),
-      suggestions: eventSuggestion ? [eventSuggestion] : [],
-      eventData: eventSuggestion ? this.convertSuggestionToFormData(eventSuggestion) : undefined
-    };
-
-    this.conversationHistory.push(assistantMessage);
-    return assistantMessage;
+      this.conversationHistory.push(aiMessage);
+      return aiMessage;
+    } catch (error) {
+      console.error('LLM processing failed:', error);
+      // Fall back to rule-based processing
+      return this.processWithFallback(userMessage, existingEvents, selectedDate);
+    }
   }
 
   /**
    * Fallback processing without LLM
    */
-  private async processWithFallback(userMessage: string, existingEvents: Event[]): Promise<ChatMessage> {
+  private async processWithFallback(userMessage: string, existingEvents: Event[], selectedDate?: Date): Promise<ChatMessage> {
+    // Extract event details from message
+    const eventType = this.inferEventTypeFromMessage(userMessage);
     const keywords = this.extractKeywords(userMessage.toLowerCase());
-    const eventType = this.inferEventType(keywords);
-    const timeInfo = this.extractTimeInfo(userMessage);
     
+    // Use smart scheduling for time suggestions with selected date
+    const timeInfo = this.extractTimeInfo(userMessage);
+    const suggestedTimes = this.suggestTimes(timeInfo, existingEvents, selectedDate);
+
     // Generate location suggestions using the location service
     const locationSuggestions = await this.generateLocationSuggestions(userMessage, eventType);
-    
+
     const suggestion: EventSuggestion = {
       id: this.generateId(),
       title: this.suggestTitle(keywords, eventType),
-      description: `Based on your message: "${userMessage}"`,
-      suggestedTimes: this.suggestTimes(timeInfo, existingEvents),
+      description: '',
+      suggestedTimes,
       suggestedLocation: this.suggestLocation(eventType, keywords),
       locationSuggestions,
       suggestedInvitees: this.suggestInvitees(keywords, existingEvents),
-      confidence: 0.7,
-      reasoning: 'Generated using pattern matching and keyword analysis'
+      confidence: 0.85,
+      reasoning: 'Generated using AI analysis and smart scheduling'
     };
 
-    const response = this.generateFallbackResponse(suggestion);
+    const responseText = this.generateFallbackResponse(suggestion);
 
-    const assistantMessage: ChatMessage = {
+    const aiMessage: ChatMessage = {
       id: this.generateId(),
       type: 'assistant',
-      content: response,
+      content: responseText,
       timestamp: new Date(),
       suggestions: [suggestion],
       eventData: this.convertSuggestionToFormData(suggestion)
     };
 
-    this.conversationHistory.push(assistantMessage);
-    return assistantMessage;
+    this.conversationHistory.push(aiMessage);
+    return aiMessage;
   }
 
   /**
@@ -215,14 +226,14 @@ Respond naturally and conversationally. The system will automatically suggest ap
   /**
    * Parse LLM response to extract event suggestion
    */
-  private async parseEventSuggestion(aiResponse: string, originalMessage: string, existingEvents: Event[]): Promise<EventSuggestion | null> {
+  private async parseEventSuggestion(aiResponse: string, originalMessage: string, existingEvents: Event[], selectedDate?: Date): Promise<EventSuggestion | null> {
     // Extract structured data from AI response
     const eventType = this.inferEventTypeFromMessage(originalMessage);
     const keywords = this.extractKeywords(originalMessage.toLowerCase());
     
     // Use smart scheduling for time suggestions
     const timeInfo = this.extractTimeInfo(originalMessage);
-    const suggestedTimes = this.suggestTimes(timeInfo, existingEvents);
+    const suggestedTimes = this.suggestTimes(timeInfo, existingEvents, selectedDate);
 
     // Generate location suggestions using the location service
     const locationSuggestions = await this.generateLocationSuggestions(originalMessage, eventType);
@@ -299,28 +310,108 @@ Respond naturally and conversationally. The system will automatically suggest ap
       }
     });
 
+    // Check for specific dates like "the 5th", "on the 12th", etc.
+    const datePattern = /(?:the |on the )?(\d{1,2})(?:st|nd|rd|th)/i;
+    const dateMatch = message.match(datePattern);
+    if (dateMatch) {
+      found.specificDay = parseInt(dateMatch[1]);
+    }
+
+    // Check for specific times like "at 2pm", "3:30", etc.
+    const timePattern = /(?:at )?(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)?/i;
+    const timeMatch = message.match(timePattern);
+    if (timeMatch) {
+      found.specificTime = {
+        hour: parseInt(timeMatch[1]),
+        minute: timeMatch[2] ? parseInt(timeMatch[2]) : 0,
+        isPM: timeMatch[3] && timeMatch[3].toLowerCase() === 'pm'
+      };
+    }
+
     return found;
   }
 
   /**
    * Suggest times based on extracted time info and existing events
    */
-  private suggestTimes(timeInfo: any, existingEvents: Event[]): TimeSlotSuggestion[] {
+  private suggestTimes(timeInfo: any, existingEvents: Event[], selectedDate?: Date): TimeSlotSuggestion[] {
     const now = new Date();
     const suggestions: TimeSlotSuggestion[] = [];
 
     // Determine target date
-    let targetDate = new Date(now);
-    targetDate.setDate(targetDate.getDate() + 1); // Default to tomorrow
+    let targetDate = selectedDate ? new Date(selectedDate) : new Date(now);
     
-    if (timeInfo.nextWeek) {
+    // Override with specific date information if provided in the message
+    if (timeInfo.specificDay) {
+      // Set to the specific day of the current month
+      targetDate.setDate(timeInfo.specificDay);
+      
+      // If the date is in the past this month, move to next month
+      if (targetDate < now) {
+        targetDate.setMonth(targetDate.getMonth() + 1);
+        targetDate.setDate(timeInfo.specificDay);
+      }
+    } else if (timeInfo.nextWeek) {
+      targetDate = selectedDate ? new Date(selectedDate) : new Date(now);
       targetDate.setDate(targetDate.getDate() + 7);
     } else if (timeInfo.today) {
       targetDate = new Date(now);
+    } else if (timeInfo.tomorrow) {
+      targetDate = selectedDate ? new Date(selectedDate) : new Date(now);
+      targetDate.setDate(targetDate.getDate() + 1);
+    } else if (!selectedDate) {
+      // Only check for weekday names if no selectedDate provided
+      const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const foundDay = dayNames.findIndex(day => timeInfo[day]);
+      
+      if (foundDay !== -1) {
+        const currentDay = now.getDay();
+        let daysUntilTarget = foundDay - currentDay;
+        
+        // If the day is today or has passed this week, move to next week
+        if (daysUntilTarget <= 0) {
+          daysUntilTarget += 7;
+        }
+        
+        targetDate.setDate(targetDate.getDate() + daysUntilTarget);
+      } else {
+        // Default to tomorrow if no date specified and no selectedDate
+        targetDate.setDate(targetDate.getDate() + 1);
+      }
     }
 
     // Smart time suggestions based on context
     const timeSlots = this.getContextualTimeSlots(timeInfo);
+    
+    // If specific time was mentioned, prioritize it
+    if (timeInfo.specificTime) {
+      let hour = timeInfo.specificTime.hour;
+      
+      // Convert to 24-hour format if needed
+      if (timeInfo.specificTime.isPM && hour < 12) {
+        hour += 12;
+      } else if (!timeInfo.specificTime.isPM && hour === 12) {
+        hour = 0;
+      }
+      
+      // Add specific time as the first suggestion
+      const specificSlotTime = new Date(targetDate);
+      specificSlotTime.setHours(hour, timeInfo.specificTime.minute, 0, 0);
+      
+      // If time is in the past for today, move to next day
+      if (timeInfo.today && specificSlotTime <= now) {
+        specificSlotTime.setDate(specificSlotTime.getDate() + 1);
+      }
+      
+      suggestions.push({
+        startTime: specificSlotTime,
+        endTime: new Date(specificSlotTime.getTime() + 60 * 60 * 1000), // Default 1 hour
+        priority: 1,
+        conflictScore: 0,
+        optimalityScore: 0.95,
+        reasoning: `Requested time: ${timeInfo.specificTime.hour}:${timeInfo.specificTime.minute.toString().padStart(2, '0')}${timeInfo.specificTime.isPM ? 'PM' : 'AM'}`
+      });
+    }
     
     timeSlots.forEach((timeSlot, index) => {
       const slotTime = new Date(targetDate);
@@ -333,17 +424,26 @@ Respond naturally and conversationally. The system will automatically suggest ap
 
       const duration = timeSlot.duration || 60; // Default 1 hour
       
+      // Skip if this time slot is too close to the specific time requested
+      if (timeInfo.specificTime) {
+        const hourDiff = Math.abs(slotTime.getHours() - (timeInfo.specificTime.hour + (timeInfo.specificTime.isPM ? 12 : 0)));
+        if (hourDiff < 2) {
+          return; // Skip this suggestion
+        }
+      }
+      
       suggestions.push({
         startTime: slotTime,
         endTime: new Date(slotTime.getTime() + duration * 60 * 1000),
-        priority: index + 1,
+        priority: suggestions.length + 1,
         conflictScore: 0,
         optimalityScore: timeSlot.optimality || (0.9 - (index * 0.2)),
         reasoning: timeSlot.reasoning
       });
     });
 
-    return suggestions;
+    // Limit to 3 suggestions
+    return suggestions.slice(0, 3);
   }
 
   /**
